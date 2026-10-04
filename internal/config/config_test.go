@@ -140,3 +140,43 @@ func TestRejectsAmbiguousAndUnknownConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestExplicitSharedRuleMapCanBeClearedAcrossReloadAndRestart(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte(`{"owner_ids":[9],"model":{"name":"m"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Set(nil, "rules", json.RawMessage(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Snapshot().Base.Rules) != 0 {
+		t.Fatal("clear reported success but retained old rules")
+	}
+	if err := m.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Snapshot().Base.Rules) != 0 {
+		t.Fatal("reload resurrected default punishments")
+	}
+	m, err = Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Snapshot().Base.Rules) != 0 {
+		t.Fatal("restart resurrected default punishments")
+	}
+}
+
+func TestExplicitQuestionSetReplacesDefaults(t *testing.T) {
+	c, err := Decode([]byte(`{"owner_ids":[9],"model":{"name":"m"},"base":{"rules":{}},"questions":{"custom":{"type":"noul","instructions":"custom question"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Questions) != 1 || len(c.Base.Rules) != 0 {
+		t.Fatal("explicit dictionaries inherited unwanted defaults")
+	}
+}

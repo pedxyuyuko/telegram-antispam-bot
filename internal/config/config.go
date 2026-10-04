@@ -233,6 +233,27 @@ func strict(raw []byte, out any) error {
 
 func Decode(raw []byte) (Config, error) {
 	c := Defaults()
+	// Omitted dictionaries use defaults; explicitly supplied dictionaries are
+	// complete sets. Group policies are merged separately, field by field.
+	var root map[string]json.RawMessage
+	if err := strict(raw, &root); err != nil {
+		return Config{}, err
+	}
+	if _, present := root["questions"]; present {
+		c.Questions = nil
+	}
+	if _, present := root["groups"]; present {
+		c.Groups = nil
+	}
+	if base, present := root["base"]; present {
+		var fields map[string]json.RawMessage
+		if err := strict(base, &fields); err != nil {
+			return Config{}, err
+		}
+		if _, present := fields["rules"]; present {
+			c.Base.Rules = nil
+		}
+	}
 	if err := strict(raw, &c); err != nil {
 		return Config{}, err
 	}
@@ -406,9 +427,11 @@ func (m *Manager) change(chat *int64, path string, value json.RawMessage, remove
 		return err
 	}
 	if chat == nil {
-		if err := strict(target, &c.Base); err != nil {
+		var policy Policy
+		if err := strict(target, &policy); err != nil {
 			return err
 		}
+		c.Base = policy
 	} else {
 		c.Groups[strconv.FormatInt(*chat, 10)] = target
 	}
