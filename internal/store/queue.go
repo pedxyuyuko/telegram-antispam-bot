@@ -32,11 +32,8 @@ func (s *Store) AddRevision(ctx context.Context, in Inbox, m *telegram.Message, 
 	if !errors.Is(err, sql.ErrNoRows) {
 		return 0, err
 	}
-	// Every edit keeps its own archived version; only the newest version remains
-	// eligible for future inference or moderation.
-	if _, err := tx.ExecContext(ctx, `UPDATE revisions SET status='superseded' WHERE chat_id=? AND message_id=? AND status IN ('pending','running')`, m.Chat.ID, m.ID); err != nil {
-		return 0, err
-	}
+	// Every retained version is inferred. Stale results are archived without
+	// counting or acting; bounded-queue eviction is the only capacity shortcut.
 	rawSnapshot, err := json.Marshal(snapshot)
 	if err != nil {
 		return 0, err

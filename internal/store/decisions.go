@@ -47,6 +47,16 @@ func (s *Store) Finish(ctx context.Context, j Job, result decision.Result, infer
 	if status != "running" {
 		return tx.Commit()
 	}
+	var latest int64
+	if err := tx.QueryRowContext(ctx, `SELECT max(id) FROM revisions WHERE chat_id=? AND message_id=?`, j.ChatID, j.MessageID).Scan(&latest); err != nil {
+		return err
+	}
+	if latest != j.ID {
+		if _, err := tx.ExecContext(ctx, `UPDATE revisions SET status='superseded' WHERE id=?`, j.ID); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE revisions SET status='succeeded' WHERE id=?`, j.ID); err != nil {
 		return err
 	}

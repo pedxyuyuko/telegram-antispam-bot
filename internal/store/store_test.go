@@ -275,3 +275,26 @@ func TestDatabaseHasOneOwningProcess(t *testing.T) {
 	}
 	other.Close()
 }
+
+func TestEveryQueuedEditIsJudgedButOnlyNewestCanCount(t *testing.T) {
+	s := openTest(t)
+	p := config.Defaults().Base
+	p.Mode = "enforce"
+	first := add(t, s, 1, -100, 1, 42, p)
+	second := add(t, s, 2, -100, 1, 42, p)
+	if got := finish(t, s, 1).ID; got != first {
+		t.Fatalf("older queued version skipped: got %d want %d", got, first)
+	}
+	if a, _ := s.TakeAction(context.Background()); a != nil {
+		t.Fatal("old version was punished")
+	}
+	if got := finish(t, s, 0).ID; got != second {
+		t.Fatal("edited version skipped")
+	}
+	var attempts, hits int
+	s.db.QueryRow(`SELECT count(*) FROM attempts`).Scan(&attempts)
+	s.db.QueryRow(`SELECT count(*) FROM hits`).Scan(&hits)
+	if attempts != 2 || hits != 0 {
+		t.Fatalf("attempts=%d hits=%d", attempts, hits)
+	}
+}
