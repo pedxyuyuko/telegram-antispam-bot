@@ -78,6 +78,14 @@ func (a *App) ProcessAction(ctx context.Context) (bool, error) {
 		detail = "decision question changed"
 		return finish()
 	}
+	var message telegram.Message
+	if err := json.Unmarshal(job.Raw, &message); err != nil {
+		return false, err
+	}
+	if message.SenderChat != nil && message.SenderChat.ID == message.Chat.ID {
+		detail = "anonymous group administrator is protected"
+		return finish()
+	}
 	if intent.UserID == a.Telegram.Me.ID || cfg.IsOwner(intent.UserID) {
 		detail = "bot or bot owner is protected"
 		return finish()

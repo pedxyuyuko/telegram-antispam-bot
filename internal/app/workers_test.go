@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -237,6 +238,38 @@ func TestKickPreservesExistingBanAndAbsentMembership(t *testing.T) {
 			}
 			if scalar(t, path, `SELECT count(*) FROM actions WHERE status='skipped'`) != 1 {
 				t.Fatal("skipped action was not audited")
+			}
+		})
+	}
+}
+
+func TestAnonymousAdministratorProtectionPreservesExternalChannelModeration(t *testing.T) {
+	for _, sender := range []int64{-100, -200} {
+		t.Run(fmt.Sprint(sender), func(t *testing.T) {
+			var deletes atomic.Int32
+			a, path := appFixture(t, "member", func(r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "deleteMessage") {
+					deletes.Add(1)
+				}
+			})
+			modelFixture(t, a, path, nil)
+			if err := a.Config.Set(nil, "mode", json.RawMessage(`"enforce"`)); err != nil {
+				t.Fatal(err)
+			}
+			m := message(1087968824, "channel text")
+			m.From.IsBot = true
+			m.SenderChat = &telegram.Chat{ID: sender, Type: "supergroup"}
+			deliver(t, a, 1, m)
+			runModel(t, a, time.Now())
+			if worked, err := a.ProcessAction(context.Background()); err != nil || !worked {
+				t.Fatalf("dispatch: %v %v", worked, err)
+			}
+			want := int32(1)
+			if sender == -100 {
+				want = 0
+			}
+			if deletes.Load() != want {
+				t.Fatalf("sender %d: deletions=%d want=%d", sender, deletes.Load(), want)
 			}
 		})
 	}
