@@ -17,7 +17,10 @@ import (
 	"telegram-antispam-bot/internal/config"
 )
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db   *sql.DB
+	lock *os.File
+}
 type Inbox struct {
 	ID         int64
 	Raw        []byte
@@ -93,6 +96,16 @@ func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(abs), 0700); err != nil {
 		return nil, err
 	}
+	lock, err := lockDatabase(abs + ".lock")
+	if err != nil {
+		return nil, err
+	}
+	opened := false
+	defer func() {
+		if !opened {
+			lock.Close()
+		}
+	}()
 	f, err := os.OpenFile(abs, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, err
@@ -107,7 +120,7 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	s := &Store{db: db}
+	s := &Store{db: db, lock: lock}
 	var version int
 	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		db.Close()
@@ -127,9 +140,10 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	opened = true
 	return s, nil
 }
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error { return errors.Join(s.db.Close(), s.lock.Close()) }
 
 func (s *Store) Capture(ctx context.Context, raws []json.RawMessage) error {
 	tx, err := s.db.BeginTx(ctx, nil)

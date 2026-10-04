@@ -253,3 +253,25 @@ func TestSupersededUnsentActionDoesNotSuppressNewestDecision(t *testing.T) {
 		t.Fatal("successful punishment was replayed for an edit")
 	}
 }
+
+func TestDatabaseHasOneOwningProcess(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bot.sqlite")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := Open(path)
+	if err == nil {
+		other.Close()
+		s.Close()
+		t.Fatal("second instance can reset live queue and action state")
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	other, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other.Close()
+}
