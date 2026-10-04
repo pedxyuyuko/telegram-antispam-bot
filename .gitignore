@@ -30,3 +30,15 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Local runtime state and credentials
+/antispam
+/config.json
+/config.local.json
+/data/
+/logs/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite.lock
+.antispam-config-*
