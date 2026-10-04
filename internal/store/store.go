@@ -212,3 +212,9 @@ func (s *Store) Label(ctx context.Context, report, chat int64, message int, acto
 	_, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO annotations(report_update_id,chat_id,message_id,actor_id,label,target_raw,created_at) VALUES(?,?,?,?,?,?,?)`, report, chat, message, actor, label, string(raw), time.Now().UnixMilli())
 	return err
 }
+
+func (s *Store) LatestMessage(ctx context.Context, chat int64, message int) ([]byte, error) {
+	var raw []byte
+	err := s.db.QueryRowContext(ctx, `SELECT raw FROM revisions WHERE chat_id=? AND message_id=? ORDER BY id DESC LIMIT 1`, chat, message).Scan(&raw)
+	return raw, err
+}
