@@ -298,3 +298,38 @@ func TestEveryQueuedEditIsJudgedButOnlyNewestCanCount(t *testing.T) {
 		t.Fatalf("attempts=%d hits=%d", attempts, hits)
 	}
 }
+
+func TestEditDuringActionPreflightLeavesNewestPunishmentEligible(t *testing.T) {
+	for _, oldOutcome := range []string{"skipped", "succeeded"} {
+		t.Run(oldOutcome, func(t *testing.T) {
+			s := openTest(t)
+			p := config.Defaults().Base
+			p.Mode = "enforce"
+			add(t, s, 1, -100, 1, 42, p)
+			finish(t, s, 1)
+			old, err := s.TakeAction(context.Background())
+			if err != nil || old == nil {
+				t.Fatalf("claim old: %+v %v", old, err)
+			}
+			latest := add(t, s, 2, -100, 1, 42, p)
+			finish(t, s, 1)
+			// An in-flight preflight keeps the next intent waiting for its outcome.
+			if next, _ := s.TakeAction(context.Background()); next != nil {
+				t.Fatal("two actions for one message executing concurrently")
+			}
+			if err := s.FinishAction(context.Background(), old.ID, oldOutcome, "old result"); err != nil {
+				t.Fatal(err)
+			}
+			next, err := s.TakeAction(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if oldOutcome == "skipped" && (next == nil || next.RevisionID != latest) {
+				t.Fatal("both old and new punishments were skipped")
+			}
+			if oldOutcome == "succeeded" && next != nil {
+				t.Fatal("successful punishment was repeated")
+			}
+		})
+	}
+}

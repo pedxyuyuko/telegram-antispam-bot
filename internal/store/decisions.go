@@ -115,15 +115,6 @@ func (s *Store) Finish(ctx context.Context, j Job, result decision.Result, infer
 		if policy.Mode != "enforce" {
 			actionStatus = "recorded"
 		}
-		if actionStatus == "pending" {
-			var sent int
-			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM actions WHERE chat_id=? AND message_id=? AND kind=? AND mode='enforce' AND status IN ('executing','succeeded','failed','uncertain')`, j.ChatID, j.MessageID, kind).Scan(&sent); err != nil {
-				return err
-			}
-			if sent > 0 {
-				actionStatus = "skipped"
-			}
-		}
 		rule, _ := json.Marshal(c.rule)
 		until := int64(0)
 		if kind == "mute" {
@@ -144,7 +135,9 @@ func (s *Store) TakeAction(ctx context.Context) (*Action, error) {
 	defer tx.Rollback()
 	var a Action
 	var raw []byte
-	err = tx.QueryRowContext(ctx, `SELECT id,revision_id,chat_id,message_id,user_id,rule_id,rule,kind,until_date FROM actions WHERE status='pending' ORDER BY id LIMIT 1`).Scan(&a.ID, &a.RevisionID, &a.ChatID, &a.MessageID, &a.UserID, &a.RuleID, &raw, &a.Kind, &a.Until)
+	err = tx.QueryRowContext(ctx, `SELECT a.id,a.revision_id,a.chat_id,a.message_id,a.user_id,a.rule_id,a.rule,a.kind,a.until_date FROM actions a
+ WHERE a.status='pending' AND NOT EXISTS (SELECT 1 FROM actions b WHERE b.chat_id=a.chat_id AND b.message_id=a.message_id AND b.kind=a.kind AND b.status='executing')
+ ORDER BY a.id LIMIT 1`).Scan(&a.ID, &a.RevisionID, &a.ChatID, &a.MessageID, &a.UserID, &a.RuleID, &raw, &a.Kind, &a.Until)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -153,6 +146,16 @@ func (s *Store) TakeAction(ctx context.Context) (*Action, error) {
 	}
 	if err := json.Unmarshal(raw, &a.Rule); err != nil {
 		return nil, err
+	}
+	var sent int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM actions WHERE chat_id=? AND message_id=? AND kind=? AND mode='enforce' AND status IN ('succeeded','failed','uncertain')`, a.ChatID, a.MessageID, a.Kind).Scan(&sent); err != nil {
+		return nil, err
+	}
+	if sent > 0 {
+		if _, err := tx.ExecContext(ctx, `UPDATE actions SET status='skipped',detail='an earlier version already dispatched this action' WHERE id=?`, a.ID); err != nil {
+			return nil, err
+		}
+		return nil, tx.Commit()
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE actions SET status='executing' WHERE id=?`, a.ID); err != nil {
 		return nil, err
