@@ -106,7 +106,7 @@ func (a *App) ProcessInbox(ctx context.Context) (bool, error) {
 	authorized := name != "" && a.authorized(ctx, m, name, args)
 	cfg := a.Config.Snapshot()
 	status := "ignored"
-	if m.IsGroup() && (m.From == nil || !m.From.IsBot) && m.UserID() != a.Telegram.Me.ID {
+	if m.IsGroup() && (m.SenderChat != nil || m.From == nil || !m.From.IsBot) && m.UserID() != a.Telegram.Me.ID {
 		status = "pending"
 	}
 	if authorized {

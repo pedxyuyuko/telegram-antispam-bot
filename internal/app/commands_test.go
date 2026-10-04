@@ -21,7 +21,7 @@ import (
 	"telegram-antispam-bot/internal/telegram"
 )
 
-func appFixture(t *testing.T, member string) (*App, string) {
+func appFixture(t *testing.T, member string, observe ...func(*http.Request)) (*App, string) {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
@@ -39,6 +39,9 @@ func appFixture(t *testing.T, member string) (*App, string) {
 	}
 	t.Cleanup(func() { s.Close() })
 	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, fn := range observe {
+			fn(r)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case strings.HasSuffix(r.URL.Path, "getChatMember"):
