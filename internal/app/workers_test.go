@@ -208,3 +208,36 @@ func TestRunStopsAllLoopsOnCancellation(t *testing.T) {
 		t.Fatal("shutdown stuck")
 	}
 }
+
+func TestKickPreservesExistingBanAndAbsentMembership(t *testing.T) {
+	for _, membership := range []string{"kicked", "left"} {
+		t.Run(membership, func(t *testing.T) {
+			var removals atomic.Int32
+			a, path := appFixture(t, membership, func(r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "unbanChatMember") {
+					removals.Add(1)
+				}
+			})
+			modelFixture(t, a, path, nil)
+			for key, value := range map[string]string{
+				"mode": `"enforce"`, "rules.delete.enabled": `false`,
+				"rules.repeat": `{"enabled":true,"question":"violation","threshold":0.9,"count":1,"window_seconds":0,"action":"kick","duration_seconds":0}`,
+			} {
+				if err := a.Config.Set(nil, key, json.RawMessage(value)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			deliver(t, a, 1, message(50, "sample"))
+			runModel(t, a, time.Now())
+			if worked, err := a.ProcessAction(context.Background()); err != nil || !worked {
+				t.Fatalf("dispatch: %v %v", worked, err)
+			}
+			if removals.Load() != 0 {
+				t.Fatal("kick altered existing ban or absent membership")
+			}
+			if scalar(t, path, `SELECT count(*) FROM actions WHERE status='skipped'`) != 1 {
+				t.Fatal("skipped action was not audited")
+			}
+		})
+	}
+}

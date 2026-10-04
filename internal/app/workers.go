@@ -98,6 +98,10 @@ func (a *App) ProcessAction(ctx context.Context) (bool, error) {
 			detail = "group administrator is protected"
 			return finish()
 		}
+		if intent.Kind != "delete" && member != "member" && member != "restricted" {
+			detail = "target is no longer an active member; preserve existing membership state"
+			return finish()
+		}
 	}
 	switch intent.Kind {
 	case "delete":
