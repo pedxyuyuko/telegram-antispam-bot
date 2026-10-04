@@ -1,0 +1,8 @@
+# Allow only build inputs; local state and credentials stay on the host.
+**
+!go.mod
+!go.sum
+!cmd/
+!cmd/**
+!internal/
+!internal/**
