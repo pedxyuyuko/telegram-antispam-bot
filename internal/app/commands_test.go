@@ -172,3 +172,22 @@ func TestAnonymousSenderCannotUseFakeUserForAuthorization(t *testing.T) {
 		t.Fatal("anonymous chat acquired owner privileges")
 	}
 }
+
+func TestOwnerStillNeedsLocalAdministratorRightsForGroupCommands(t *testing.T) {
+	a, path := appFixture(t, "member")
+	deliver(t, a, 1, message(9, `/as_set mode "enforce"`))
+	if a.Config.Snapshot().ForGroup(-100).Mode != "record" {
+		t.Fatal("owner changed local policy without group admin rights")
+	}
+	m := message(9, "@guard_bot")
+	m.Entities = []telegram.Entity{{Type: "mention", Offset: 0, Length: 10}}
+	m.Reply = message(50, "ad")
+	deliver(t, a, 2, m)
+	if scalar(t, path, `SELECT count(*) FROM annotations`) != 0 {
+		t.Fatal("owner labeled a local message without group admin rights")
+	}
+	deliver(t, a, 3, message(9, `/as_set base queue_limit 8`))
+	if a.Config.Snapshot().Base.QueueLimit != 8 {
+		t.Fatal("owner lost shared configuration permissions")
+	}
+}

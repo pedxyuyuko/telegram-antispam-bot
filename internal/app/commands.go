@@ -69,14 +69,11 @@ func (a *App) authorized(ctx context.Context, m *telegram.Message, name, args st
 	if user == 0 {
 		return false
 	}
-	if a.Config.Snapshot().IsOwner(user) {
-		return true
+	if sharedCommand(name, args) {
+		return a.Config.Snapshot().IsOwner(user)
 	}
 	if !m.IsGroup() {
 		return name == "as_help" || name == "start"
-	}
-	if sharedCommand(name, args) {
-		return false
 	}
 	status, err := a.Telegram.MemberStatus(ctx, m.Chat.ID, user)
 	if err != nil {
