@@ -333,3 +333,48 @@ func TestEditDuringActionPreflightLeavesNewestPunishmentEligible(t *testing.T) {
 		})
 	}
 }
+
+func TestCloseWaitsForOutstandingTransactionBeforeReleasingOwnership(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bot.sqlite")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	closed := make(chan error, 1)
+	go func() { close(started); closed <- s.Close() }()
+	<-started
+	select {
+	case err := <-closed:
+		tx.Rollback()
+		t.Fatalf("database ownership released while a transaction still held its connection: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	other, err := Open(path)
+	if err == nil {
+		other.Close()
+		tx.Rollback()
+		<-closed
+		t.Fatal("another instance acquired a database still rolling back")
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("close failed to drain")
+	}
+	other, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other.Close()
+}

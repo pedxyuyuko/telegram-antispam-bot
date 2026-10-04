@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -18,8 +19,10 @@ import (
 )
 
 type Store struct {
-	db   *sql.DB
-	lock *os.File
+	db      *sql.DB
+	lock    *os.File
+	closeMu sync.Mutex
+	closed  bool
 }
 type Inbox struct {
 	ID         int64
@@ -143,7 +146,29 @@ func Open(path string) (*Store, error) {
 	opened = true
 	return s, nil
 }
-func (s *Store) Close() error { return errors.Join(s.db.Close(), s.lock.Close()) }
+func (s *Store) Close() error {
+	s.closeMu.Lock()
+	defer s.closeMu.Unlock()
+	if s.closed {
+		return nil
+	}
+	// database/sql can finish context-triggered rollbacks after a caller returns.
+	// Leasing our sole connection is a barrier for that work before DB.Close.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("drain database before closing: %w", err)
+	}
+	if err := conn.Close(); err != nil {
+		return err
+	}
+	if err := s.db.Close(); err != nil {
+		return err
+	}
+	s.closed = true
+	return s.lock.Close()
+}
 
 func (s *Store) Capture(ctx context.Context, raws []json.RawMessage) error {
 	tx, err := s.db.BeginTx(ctx, nil)

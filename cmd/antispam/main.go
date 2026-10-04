@@ -32,7 +32,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, args []string, out, logs io.Writer) error {
+func run(ctx context.Context, args []string, out, logs io.Writer) (err error) {
 	flags := flag.NewFlagSet("antispam", flag.ContinueOnError)
 	flags.SetOutput(logs)
 	path := flags.String("config", "config.json", "configuration file")
@@ -81,7 +81,7 @@ func run(ctx context.Context, args []string, out, logs io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("database: %w", err)
 	}
-	defer s.Close()
+	defer func() { err = errors.Join(err, s.Close()) }()
 	if err := s.Resize(ctx, c); err != nil {
 		return err
 	}
