@@ -3,7 +3,108 @@
 使用 Go、`github.com/go-telegram/bot` 和 Jev/System One 兼容决策接口的 Telegram 群反垃圾机器人。
 识别重点是诈骗、黑灰产推广；默认启动为 **只记录模式**。
 
-## 启动
+## Docker / Compose 启动
+
+适用于 Linux 服务器，支持 Docker Compose 和 Podman Compose。
+镜像默认使用 UID/GID `65532:65532`；Compose 按 `.env` 中的 UID/GID 运行，以便与宿主机文件权限一致。
+
+### 1. 构建镜像
+
+```sh
+docker build -t telegram-antispam-bot:local .
+```
+
+构建阶段使用 Go 1.26；运行镜像包含静态程序和 HTTPS 根证书。
+构建上下文仅包含 Go 源码与依赖清单，本地配置、密钥和数据库保留在宿主机。
+
+### 2. 创建配置和环境变量文件
+
+```sh
+mkdir -p runtime
+chmod 700 runtime
+(set -C; umask 077; docker run --rm --pull=never telegram-antispam-bot:local -example > runtime/config.json)
+cp -n .env.example .env
+chmod 600 .env
+id -u
+id -g
+```
+
+编辑 `.env`：
+
+- `BOT_UID`、`BOT_GID`：填上面两个命令的输出；宿主机 root 用户通常均为 `0`。
+- `TELEGRAM_BOT_TOKEN`：填 BotFather 提供的令牌。
+- `SYSTEMONE_API_KEY`：填模型服务密钥；服务关闭鉴权时留空。
+
+rootless Podman 的默认用户命名空间把容器 UID/GID `0:0` 映射到运行 Podman 的宿主机用户，此时可使用 `BOT_UID=0`、`BOT_GID=0`。
+
+编辑 `runtime/config.json`，至少设置 `owner_ids`、`model.base_url` 和 `model.name`。
+下面是一份可独立使用的精简配置，其余参数使用内建默认值：
+
+```json
+{
+  "owner_ids": [123456789],
+  "model": {
+    "base_url": "http://127.0.0.1:8000",
+    "name": "replace-with-served-model-name"
+  },
+  "base": {
+    "mode": "record",
+    "debug": true,
+    "queue_limit": 100
+  },
+  "groups": {
+    "-1001234567890": {
+      "rules": {
+        "repeat": { "duration_seconds": 120 }
+      }
+    }
+  }
+}
+```
+
+将数字 ID 和模型名替换成实际值。`groups` 也可以设为 `{}`，让所有群使用共享配置。
+`base.mode=record` 是只记录模式；`base.debug=true` 把各题概率写入日志。
+
+Compose 使用宿主机网络，本机模型服务可以填写 `http://127.0.0.1:8000`。
+远程服务填写它的实际地址，程序追加 `/v1/systemone`。
+Docker Desktop 4.34 及更新版本需要先启用设置中的 host networking。
+
+### 3. 校验并启动
+
+```sh
+docker compose config --quiet
+docker compose run --rm -T --no-deps antispam -config /runtime/config.json -check
+docker compose up -d
+docker compose logs -f antispam
+```
+
+把机器人设为群管理员，授予删除消息和限制成员权限。
+服务通过 Telegram 主动轮询接收消息。
+Podman 环境也可把以上 `docker` 换成 `podman`。
+
+### 4. 管理配置与持久化数据
+
+- `runtime/config.json`：配置文件，Telegram 管理命令会把修改写回这里。
+- `runtime/data/bot.sqlite`：默认数据库，保存消息、判定结果、队列和人工标注。
+- `runtime/data/`：同时保留 SQLite 的 WAL、共享内存及锁文件。
+- `.env`：容器环境变量，保存令牌和运行用户设置。
+
+整个 `runtime` 目录以可写方式挂载，支持配置文件原子替换和数据库写入。
+更换镜像、重建容器后，宿主机目录中的数据继续保留。
+手工修改 JSON 后，在 Telegram 执行 `/as_reload`；修改 `.env` 后重建容器：
+
+```sh
+docker compose up -d --force-recreate
+```
+
+更新代码后的重建命令：
+
+```sh
+docker compose build
+docker compose up -d --force-recreate
+```
+
+## 直接运行二进制
 
 需要 Go 1.26，以及 Linux、macOS 或 BSD。SQLite 驱动为纯 Go，数据库随程序运行创建。
 
@@ -173,6 +274,14 @@ go test -race ./...
 go vet ./...
 go build ./cmd/antispam
 ```
+
+构建镜像后可运行真实容器集成测试，测试期间使用本地模拟 API：
+
+```sh
+ANTISPAM_CONTAINER_IMAGE=telegram-antispam-bot:local go test -race ./tests/container -count=1 -timeout=90s
+```
+
+容器测试覆盖非 root 默认用户、HTTPS 根证书、只读根文件系统、命令写回、数据库持久化和重启恢复；同时通过仓库中的 Compose 定义运行同一组流程。
 
 测试使用本地 HTTP 服务和真实 SQLite，覆盖 API 协议、原始字段保存、配置权限、逐版本处理、异常积压、恢复和处罚。
 正式启用前在测试群核对机器人权限、资料获取情况及模型实际效果。

@@ -1,0 +1,23 @@
+services:
+  antispam:
+    image: ${ANTISPAM_IMAGE:-telegram-antispam-bot:local}
+    build:
+      context: .
+    pull_policy: never
+    restart: unless-stopped
+    # Linux host networking keeps host-local System One endpoints reachable.
+    network_mode: host
+    user: "${BOT_UID:-65532}:${BOT_GID:-65532}"
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN in .env}
+      SYSTEMONE_API_KEY: ${SYSTEMONE_API_KEY:-}
+    volumes:
+      # Directory write access supports atomic config replacement and SQLite WAL.
+      # Shared SELinux labeling also permits one-off validation containers.
+      - ./runtime:/runtime:z
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s

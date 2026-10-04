@@ -43,7 +43,7 @@ func command(t *testing.T, engine string, args ...string) []byte {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, engine, args...)
+	cmd := containerCommand(ctx, engine, args...)
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
@@ -53,12 +53,25 @@ func command(t *testing.T, engine string, args ...string) []byte {
 	return out.Bytes()
 }
 
+func containerCommand(ctx context.Context, engine string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, engine, args...)
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		switch key {
+		case "TELEGRAM_BOT_TOKEN", "SYSTEMONE_API_KEY", "BOT_UID", "BOT_GID", "ANTISPAM_IMAGE", "COMPOSE_FILE", "COMPOSE_PROJECT_NAME", "COMPOSE_ENV_FILES":
+			continue
+		}
+		cmd.Env = append(cmd.Env, entry)
+	}
+	return cmd
+}
+
 func cleanupContainer(t *testing.T, engine, name string) {
 	t.Helper()
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		_ = exec.CommandContext(ctx, engine, "rm", "--force", name).Run()
+		_ = containerCommand(ctx, engine, "rm", "--force", name).Run()
 	})
 }
 
@@ -90,6 +103,15 @@ func TestImageHasNonRootDefaultsAndHTTPSRoots(t *testing.T) {
 }
 
 func TestContainerPersistsCommandChangesAndResumesPolling(t *testing.T) {
+	testPersistentRuntime(t, false)
+}
+
+func TestComposePersistsCommandChangesAndResumesPolling(t *testing.T) {
+	testPersistentRuntime(t, true)
+}
+
+func testPersistentRuntime(t *testing.T, useCompose bool) {
+	t.Helper()
 	engine, name := image(t)
 	var phase atomic.Int32
 	var batches atomic.Int32
@@ -157,7 +179,8 @@ func TestContainerPersistsCommandChangesAndResumesPolling(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]any{"model": request.Model, "answers": answers})
 	}))
 	t.Cleanup(model.Close)
-	state := filepath.Join(t.TempDir(), "runtime")
+	projectDir := t.TempDir()
+	state := filepath.Join(projectDir, "runtime")
 	if err := os.Mkdir(state, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -173,8 +196,37 @@ func TestContainerPersistsCommandChangesAndResumesPolling(t *testing.T) {
 	}
 	user := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
 	containerName := fmt.Sprintf("antispam-test-%d", time.Now().UnixNano())
-	cleanupContainer(t, engine, containerName)
-	command(t, engine, "run", "--detach", "--pull=never", "--name", containerName, "--network=host", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--user", user, "--volume", state+":/runtime:z", "--env", "TELEGRAM_BOT_TOKEN=123:container-test", name)
+	var composePrefix []string
+	if useCompose {
+		definition, err := os.ReadFile(filepath.Join("..", "..", "compose.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		composeFile := filepath.Join(projectDir, "compose.yaml")
+		if err := os.WriteFile(composeFile, definition, 0600); err != nil {
+			t.Fatal(err)
+		}
+		envFile := filepath.Join(projectDir, ".env")
+		environment := fmt.Sprintf("ANTISPAM_IMAGE=%s\nBOT_UID=%d\nBOT_GID=%d\nTELEGRAM_BOT_TOKEN=123:container-test\nSYSTEMONE_API_KEY=\n", name, os.Getuid(), os.Getgid())
+		if err := os.WriteFile(envFile, []byte(environment), 0600); err != nil {
+			t.Fatal(err)
+		}
+		composePrefix = []string{"compose", "--file", composeFile, "--project-name", containerName, "--env-file", envFile}
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			_ = containerCommand(ctx, engine, append(composePrefix, "down", "--remove-orphans")...).Run()
+		})
+		command(t, engine, append(composePrefix, "config", "--quiet")...)
+		command(t, engine, append(composePrefix, "up", "--detach", "--no-build")...)
+		containerName = strings.TrimSpace(string(command(t, engine, append(composePrefix, "ps", "--quiet")...)))
+		if containerName == "" {
+			t.Fatal("Compose did not create the service")
+		}
+	} else {
+		cleanupContainer(t, engine, containerName)
+		command(t, engine, "run", "--detach", "--pull=never", "--name", containerName, "--network=host", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--user", user, "--volume", state+":/runtime:z", "--env", "TELEGRAM_BOT_TOKEN=123:container-test", name)
+	}
 	dbpath := filepath.Join(state, "data", "bot.sqlite")
 	wait(t, func() bool {
 		current, err := config.Open(configPath)
@@ -197,7 +249,11 @@ func TestContainerPersistsCommandChangesAndResumesPolling(t *testing.T) {
 	}, func() string { return string(command(t, engine, "logs", containerName)) })
 	// A read-only validation helper shares the same directory with the live bot.
 	// A shared SELinux label keeps that helper from invalidating the live mount.
-	command(t, engine, "run", "--rm", "--pull=never", "--network=none", "--read-only", "--user", user, "--volume", state+":/runtime:z", name, "-config", "/runtime/config.json", "-check")
+	if useCompose {
+		command(t, engine, append(composePrefix, "run", "--rm", "-T", "--no-deps", "antispam", "-config", "/runtime/config.json", "-check")...)
+	} else {
+		command(t, engine, "run", "--rm", "--pull=never", "--network=none", "--read-only", "--user", user, "--volume", state+":/runtime:z", name, "-config", "/runtime/config.json", "-check")
+	}
 	command(t, engine, "stop", "--time=10", containerName)
 	if exit := strings.TrimSpace(string(command(t, engine, "inspect", "--format", "{{.State.ExitCode}}", containerName))); exit != "0" {
 		t.Fatalf("unclean stop: %s", exit)
