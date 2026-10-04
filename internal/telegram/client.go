@@ -158,6 +158,9 @@ func (c *Client) MemberStatus(ctx context.Context, chat, user int64) (string, er
 	if err != nil {
 		return "", c.safe(err)
 	}
+	if m.Type == models.ChatMemberTypeRestricted && m.Restricted != nil && !m.Restricted.IsMember {
+		return "left", nil
+	}
 	return string(m.Type), nil
 }
 func (c *Client) Send(ctx context.Context, m *Message, text string) error {

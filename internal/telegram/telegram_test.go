@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -112,5 +113,33 @@ func TestSDKUsesFiniteMuteAndRejoinableKick(t *testing.T) {
 	}
 	if err := c.Mute(context.Background(), -100, 42, time.Now().Add(10*time.Second)); err == nil {
 		t.Fatal("accepted Telegram's permanent-mute range")
+	}
+}
+
+func TestRestrictedFormerMemberIsTreatedAsAbsent(t *testing.T) {
+	for _, present := range []bool{false, true} {
+		t.Run(fmt.Sprint(present), func(t *testing.T) {
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintf(w, `{"ok":true,"result":{"status":"restricted","user":{"id":42,"first_name":"u"},"is_member":%t,"until_date":0}}`, present)
+			}))
+			defer s.Close()
+			cfg := config.Defaults().Telegram
+			cfg.APIBase = s.URL
+			c, err := New(cfg, "123:secret", s.Client(), 0, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			status, err := c.MemberStatus(context.Background(), -100, 42)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "left"
+			if present {
+				want = "restricted"
+			}
+			if status != want {
+				t.Fatalf("membership=%v: status=%s want=%s", present, status, want)
+			}
+		})
 	}
 }
