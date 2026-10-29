@@ -109,7 +109,12 @@ func (a *App) ProcessInbox(ctx context.Context) (bool, error) {
 	if authorized {
 		status = "command"
 	}
-	if _, err := a.Store.AddRevision(ctx, *in, m, store.Snapshot{Policy: cfg.ForGroup(m.Chat.ID), Questions: cfg.Questions}, status); err != nil {
+	policy := cfg.ForGroup(m.Chat.ID)
+	questions, err := cfg.SelectedQuestions(policy)
+	if err != nil {
+		return false, err
+	}
+	if _, err := a.Store.AddRevision(ctx, *in, m, store.Snapshot{Policy: policy, Questions: questions}, status); err != nil {
 		return false, err
 	}
 	if authorized {

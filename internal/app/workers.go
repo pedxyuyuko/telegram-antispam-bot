@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"telegram-antispam-bot/internal/decision"
 	"telegram-antispam-bot/internal/telegram"
 )
 
@@ -37,7 +38,11 @@ func (a *App) ProcessModel(ctx context.Context, now time.Time) (bool, error) {
 	if inferenceErr != nil {
 		a.Log.Warn("model attempt failed; queued for retry", "chat", j.ChatID, "message", j.MessageID, "revision", j.ID, "error", inferenceErr)
 	} else if cfg.ForGroup(j.ChatID).Debug {
-		a.Log.Info("model probabilities", "chat", j.ChatID, "message", j.MessageID, "revision", j.ID, "probabilities", result.Probabilities, "duration_ms", result.Duration.Milliseconds())
+		evaluation, err := decision.EvaluatePolicy(j.Snapshot.Questions, j.Snapshot.Policy, result)
+		if err != nil {
+			return false, err
+		}
+		a.Log.Info("model probabilities", "chat", j.ChatID, "message", j.MessageID, "revision", j.ID, "probabilities", result.Probabilities, "evaluation", evaluation, "duration_ms", result.Duration.Milliseconds())
 	}
 	return true, nil
 }
@@ -74,8 +79,12 @@ func (a *App) ProcessAction(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if !job.Snapshot.Questions[rule.Question].Equal(cfg.Questions[rule.Question]) {
-		detail = "decision question changed"
+	questions, err := cfg.SelectedQuestions(policy)
+	if err != nil {
+		return false, err
+	}
+	if decision.PolicyKey(job.Snapshot.Policy, job.Snapshot.Questions, intent.Rule) != decision.PolicyKey(policy, questions, rule) {
+		detail = "decision policy or question definitions changed"
 		return finish()
 	}
 	var message telegram.Message
