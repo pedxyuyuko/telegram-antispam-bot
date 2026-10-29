@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -12,9 +11,18 @@ import (
 
 	"telegram-antispam-bot/internal/config"
 	"telegram-antispam-bot/internal/decision"
+	"telegram-antispam-bot/internal/expression"
 )
 
 func (s *Store) Finish(ctx context.Context, j Job, result decision.Result, inferenceErr error, now time.Time, retrySeconds int) error {
+	var evaluation decision.Evaluation
+	if inferenceErr == nil {
+		var err error
+		evaluation, err = decision.EvaluatePolicy(j.Snapshot.Questions, j.Snapshot.Policy, result)
+		if err != nil {
+			return fmt.Errorf("evaluate archived policy: %w", err)
+		}
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -25,8 +33,22 @@ func (s *Store) Finish(ctx context.Context, j Job, result decision.Result, infer
 	if inferenceErr != nil {
 		reason = inferenceErr.Error()
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO attempts(revision_id,created_at,request,response,probabilities,error,duration_ms) VALUES(?,?,?,?,?,?,?)`, j.ID, now.UnixMilli(), string(result.Request), string(result.Response), string(probs), reason, result.Duration.Milliseconds()); err != nil {
+	inserted, err := tx.ExecContext(ctx, `INSERT INTO attempts(revision_id,created_at,request,response,probabilities,error,duration_ms) VALUES(?,?,?,?,?,?,?)`, j.ID, now.UnixMilli(), string(result.Request), string(result.Response), string(probs), reason, result.Duration.Milliseconds())
+	if err != nil {
 		return err
+	}
+	if inferenceErr == nil {
+		attemptID, err := inserted.LastInsertId()
+		if err != nil {
+			return err
+		}
+		raw, err := json.Marshal(evaluation)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO evaluations(attempt_id,result) VALUES(?,?)`, attemptID, string(raw)); err != nil {
+			return err
+		}
 	}
 	var status string
 	if err := tx.QueryRowContext(ctx, `SELECT status FROM revisions WHERE id=?`, j.ID).Scan(&status); err != nil {
@@ -61,6 +83,9 @@ func (s *Store) Finish(ctx context.Context, j Job, result decision.Result, infer
 		return err
 	}
 	policy := j.Snapshot.Policy
+	if evaluation.Condition != expression.True {
+		return tx.Commit()
+	}
 	ids := make([]string, 0, len(policy.Rules))
 	for id := range policy.Rules {
 		ids = append(ids, id)
@@ -73,17 +98,13 @@ func (s *Store) Finish(ctx context.Context, j Job, result decision.Result, infer
 	chosen := map[string]candidate{}
 	for _, id := range ids {
 		r := policy.Rules[id]
-		p, present := result.Probabilities[r.Question]
-		if !r.Enabled || !present || p < r.Threshold {
+		p, present := evaluation.Values["p."+r.Question]
+		if !r.Enabled || (r.Question != "" && (!present || p < r.Threshold)) {
 			continue
 		}
 		// Changing the question or threshold starts a separate evidence series;
 		// changing a punishment leaves the same underlying hit history usable.
-		keyBytes, _ := json.Marshal(struct {
-			Question  config.Question
-			Threshold float64
-		}{j.Snapshot.Questions[r.Question], r.Threshold})
-		key := fmt.Sprintf("%x", sha256.Sum256(keyBytes))
+		key := decision.PolicyKey(policy, j.Snapshot.Questions, r)
 		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO hits(chat_id,message_id,sender,rule_id,rule_key,mode,occurred_at) VALUES(?,?,?,?,?,?,?)`, j.ChatID, j.MessageID, j.Sender, id, key, policy.Mode, j.ReceivedAt); err != nil {
 			return err
 		}
