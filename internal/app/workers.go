@@ -74,7 +74,7 @@ func (a *App) ProcessAction(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if job.Snapshot.Questions[rule.Question] != cfg.Questions[rule.Question] {
+	if !job.Snapshot.Questions[rule.Question].Equal(cfg.Questions[rule.Question]) {
 		detail = "decision question changed"
 		return finish()
 	}

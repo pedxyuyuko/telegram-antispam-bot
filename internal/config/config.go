@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -18,8 +19,9 @@ import (
 )
 
 type Question struct {
-	Type         string `json:"type"`
-	Instructions string `json:"instructions"`
+	Type         string          `json:"type"`
+	Instructions string          `json:"instructions"`
+	Criteria     json.RawMessage `json:"criteria,omitempty"`
 }
 
 type Rule struct {
@@ -33,10 +35,15 @@ type Rule struct {
 }
 
 type Policy struct {
-	Mode       string          `json:"mode"`
-	Debug      bool            `json:"debug"`
-	QueueLimit int             `json:"queue_limit"`
-	Rules      map[string]Rule `json:"rules"`
+	Mode            string          `json:"mode"`
+	Debug           bool            `json:"debug"`
+	QueueLimit      int             `json:"queue_limit"`
+	Rules           map[string]Rule `json:"rules"`
+	Questions       []string        `json:"questions,omitempty"`
+	Scoring         *Scoring        `json:"scoring,omitempty"`
+	Condition       string          `json:"condition,omitempty"`
+	MinConfidence   float64         `json:"min_confidence,omitempty"`
+	OnLowConfidence string          `json:"on_low_confidence,omitempty"`
 }
 
 type Model struct {
@@ -55,13 +62,14 @@ type Telegram struct {
 }
 
 type Config struct {
-	OwnerIDs  []int64                    `json:"owner_ids"`
-	Database  string                     `json:"database"`
-	Telegram  Telegram                   `json:"telegram"`
-	Model     Model                      `json:"model"`
-	Questions map[string]Question        `json:"questions"`
-	Base      Policy                     `json:"base"`
-	Groups    map[string]json.RawMessage `json:"groups"`
+	OwnerIDs       []int64                        `json:"owner_ids"`
+	Database       string                         `json:"database"`
+	Telegram       Telegram                       `json:"telegram"`
+	Model          Model                          `json:"model"`
+	Questions      map[string]Question            `json:"questions"`
+	QuestionGroups map[string]map[string]Question `json:"question_groups,omitempty"`
+	Base           Policy                         `json:"base"`
+	Groups         map[string]json.RawMessage     `json:"groups"`
 }
 
 // Defaults is safe to inspect offline. A served model name and owners are required
@@ -73,11 +81,11 @@ func Defaults() Config {
 		Telegram: Telegram{"TELEGRAM_BOT_TOKEN", "https://api.telegram.org", 30, 300},
 		Model:    Model{BaseURL: "http://127.0.0.1:8000", APIKeyEnv: "SYSTEMONE_API_KEY", TimeoutSeconds: 20, RetrySeconds: 10},
 		Questions: map[string]Question{
-			"promotion": {"noul", prefix + "当前消息是否在推广、招揽、拉群、引导私聊或交易？识别发言者本人的意图，区分引用他人话语。"},
-			"fraud":     {"noul", prefix + "当前消息是否呈现诈骗诱导特征，例如冒充可信身份、骗取凭据、诱导转账或虚假奖励？以可观察的内容为依据。"},
-			"illicit":   {"noul", prefix + "当前消息是否在推广黑灰产业务或招募参与者，例如跑分洗钱、盗号、交易被盗资料或诈骗项目？"},
-			"benign":    {"noul", prefix + "当前消息的主要用途是否是反诈提醒、举报、求助或正常引用讨论，发言者在这个语境下是在讨论或警示这些内容？"},
-			"violation": {"noul", prefix + "综合消息正文、媒体配文、按钮、链接、来源以及发言者资料，当前消息是否构成诈骗或黑灰产推广？诈骗招揽与黑灰产引流属于违规；正常分享、反诈提醒、举报、求助和引用讨论应正常通过。姓名和简介作为辅助证据，结合当前消息的实际意图判断。"},
+			"promotion": {Type: "noul", Instructions: prefix + "当前消息是否在推广、招揽、拉群、引导私聊或交易？识别发言者本人的意图，区分引用他人话语。"},
+			"fraud":     {Type: "noul", Instructions: prefix + "当前消息是否呈现诈骗诱导特征，例如冒充可信身份、骗取凭据、诱导转账或虚假奖励？以可观察的内容为依据。"},
+			"illicit":   {Type: "noul", Instructions: prefix + "当前消息是否在推广黑灰产业务或招募参与者，例如跑分洗钱、盗号、交易被盗资料或诈骗项目？"},
+			"benign":    {Type: "noul", Instructions: prefix + "当前消息的主要用途是否是反诈提醒、举报、求助或正常引用讨论，发言者在这个语境下是在讨论或警示这些内容？"},
+			"violation": {Type: "noul", Instructions: prefix + "综合消息正文、媒体配文、按钮、链接、来源以及发言者资料，当前消息是否构成诈骗或黑灰产推广？诈骗招揽与黑灰产引流属于违规；正常分享、反诈提醒、举报、求助和引用讨论应正常通过。姓名和简介作为辅助证据，结合当前消息的实际意图判断。"},
 		},
 		Base: Policy{Mode: "record", QueueLimit: 100, Rules: map[string]Rule{
 			"delete": {true, "violation", 0.95, 1, 0, "delete", 0},
@@ -114,12 +122,25 @@ func (c Config) Validate() error {
 	if !endpoint(c.Model.BaseURL) || strings.TrimSpace(c.Model.Name) == "" || c.Model.TimeoutSeconds < 1 || c.Model.TimeoutSeconds > 3600 || c.Model.RetrySeconds < 1 || c.Model.RetrySeconds > 86400 {
 		return errors.New("invalid model endpoint, name or timeouts")
 	}
-	if len(c.Questions) == 0 {
-		return errors.New("questions must be nonempty")
-	}
 	for id, q := range c.Questions {
-		if !identifier.MatchString(id) || q.Type != "noul" || strings.TrimSpace(q.Instructions) == "" {
-			return fmt.Errorf("invalid noul question %q", id)
+		if !identifier.MatchString(id) {
+			return fmt.Errorf("invalid question name %q", id)
+		}
+		if err := q.Validate(); err != nil {
+			return fmt.Errorf("question %s: %w", id, err)
+		}
+	}
+	for group, questions := range c.QuestionGroups {
+		if !identifier.MatchString(group) || len(questions) == 0 {
+			return fmt.Errorf("invalid question group %q", group)
+		}
+		for id, q := range questions {
+			if !identifier.MatchString(id) {
+				return fmt.Errorf("invalid question name %q", id)
+			}
+			if err := q.Validate(); err != nil {
+				return fmt.Errorf("question %s.%s: %w", group, id, err)
+			}
 		}
 	}
 	if err := c.validatePolicy(c.Base); err != nil {
@@ -148,14 +169,27 @@ func (c Config) validatePolicy(p Policy) error {
 	if p.QueueLimit < 1 || p.QueueLimit > 100000 {
 		return errors.New("queue_limit must be between 1 and 100000")
 	}
+	questions, err := c.SelectedQuestions(p)
+	if err != nil {
+		return err
+	}
+	if err := p.validateScoring(questions); err != nil {
+		return err
+	}
 	for id, r := range p.Rules {
 		if !identifier.MatchString(id) {
 			return fmt.Errorf("invalid rule name %q", id)
 		}
-		if _, ok := c.Questions[r.Question]; !ok {
-			return fmt.Errorf("rule %s: unknown question", id)
+		if r.Question == "" {
+			if p.Condition == "" || r.Threshold != 0 {
+				return fmt.Errorf("rule %s: requires condition, with question/threshold omitted", id)
+			}
+		} else if r.Enabled {
+			if q, ok := questions[r.Question]; !ok || q.Type != "noul" {
+				return fmt.Errorf("rule %s: requires a selected noul question", id)
+			}
 		}
-		if r.Threshold < 0 || r.Threshold > 1 || r.Count < 1 || r.WindowSeconds < 0 || r.WindowSeconds > 31536000 || (r.Count > 1 && r.WindowSeconds == 0) {
+		if math.IsNaN(r.Threshold) || math.IsInf(r.Threshold, 0) || r.Threshold < 0 || r.Threshold > 1 || r.Count < 1 || r.WindowSeconds < 0 || r.WindowSeconds > 31536000 || (r.Count > 1 && r.WindowSeconds == 0) {
 			return fmt.Errorf("rule %s: invalid threshold or window/count", id)
 		}
 		switch r.Action {
