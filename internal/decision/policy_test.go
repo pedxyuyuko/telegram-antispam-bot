@@ -90,3 +90,15 @@ func TestPolicyFingerprintSeparatesDecisionChangesFromPunishments(t *testing.T) 
 		t.Fatal("score changes reused evidence")
 	}
 }
+
+func TestConfidentScoreUsesExpectedLevelAndCanProduceNegativeTotal(t *testing.T) {
+	q := map[string]config.Question{"severity": {Type: "score", Instructions: "level?", Criteria: json.RawMessage(`["none","low","high"]`)}}
+	p := config.Policy{MinConfidence: .75, Scoring: &config.Scoring{Initial: 10, Rules: []config.ScoreRule{{Name: "low risk", When: "s.severity < 0.5", Add: -50}}}, Condition: "score < 0"}
+	e, err := EvaluatePolicy(q, p, Result{Answers: map[string]Answer{"severity": {Type: "score", Score: number(.2), Confidence: number(.75)}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Values["s.severity"] != .2 || e.Score != -40 || e.Condition != expression.True || e.Answers["severity"].Status != "answered" {
+		t.Fatalf("score answer was lost or total clamped: %+v", e)
+	}
+}
