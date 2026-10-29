@@ -127,3 +127,66 @@ func TestRejectsCollidingAnswerVariablesAcrossFlatAndGroupedQuestions(t *testing
 		t.Fatal("invalid selection changed disk configuration")
 	}
 }
+
+func TestOmittedScoringRulesSurviveInheritanceCommandsAndReload(t *testing.T) {
+	for _, groups := range []string{`{}`, `{"-100":{"debug":true}}`} {
+		t.Run(groups, func(t *testing.T) {
+			raw := `{"owner_ids":[9],"model":{"name":"m"},"base":{"scoring":{"initial":10}},"groups":` + groups + `}`
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+				t.Fatal(err)
+			}
+			m, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := m.Set(nil, "debug", json.RawMessage(`true`)); err != nil {
+				t.Fatal(err)
+			}
+			chat := int64(-100)
+			if err := m.Set(&chat, "scoring", json.RawMessage(`{"initial":20}`)); err != nil {
+				t.Fatal(err)
+			}
+			if err := m.Reload(); err != nil {
+				t.Fatal(err)
+			}
+			m, err = Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := m.Snapshot().ForGroup(chat)
+			if p.Scoring.Initial != 20 || len(p.Scoring.Rules) != 0 || !p.Debug {
+				t.Fatalf("changed inherited settings: %+v", p)
+			}
+		})
+	}
+}
+
+func TestExplicitEmptyScoringRulesContinueToClearInheritedTerms(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	raw := `{"owner_ids":[9],"model":{"name":"m"},"base":{"scoring":{"initial":10,"rules":[{"name":"risk","when":"p.fraud > 0.9","add":50}]}}}`
+	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := int64(-100)
+	if err := m.Set(&chat, "scoring.rules", json.RawMessage(`[]`)); err != nil {
+		t.Fatal(err)
+	}
+	m, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Snapshot().ForGroup(chat).Scoring.Rules) != 0 || len(m.Snapshot().Base.Scoring.Rules) != 1 {
+		t.Fatal("empty array lost replacement semantics")
+	}
+	if err := m.Reset(chat, "scoring.rules"); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Snapshot().ForGroup(chat).Scoring.Rules) != 1 {
+		t.Fatal("reset did not restore inherited terms")
+	}
+}

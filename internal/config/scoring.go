@@ -12,7 +12,7 @@ import (
 
 type Scoring struct {
 	Initial float64     `json:"initial"`
-	Rules   []ScoreRule `json:"rules"`
+	Rules   []ScoreRule `json:"rules,omitempty"`
 }
 
 type ScoreRule struct {
