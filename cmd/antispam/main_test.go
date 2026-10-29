@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"telegram-antispam-bot/internal/config"
+	"telegram-antispam-bot/internal/decision"
+	"telegram-antispam-bot/internal/expression"
 )
 
 func TestExampleAndOfflineValidation(t *testing.T) {
@@ -44,6 +46,42 @@ func TestExampleAndOfflineValidation(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(path), "data")); !os.IsNotExist(err) {
 		t.Fatal("offline validation opened a database")
+	}
+}
+
+func TestGroupedExampleValidatesAndScoresRepresentativeMessages(t *testing.T) {
+	path := filepath.Join("..", "..", "examples", "scoring.json")
+	var out, logs bytes.Buffer
+	if err := run(context.Background(), []string{"-config", path, "-check"}, &out, &logs); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := config.Decode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, err := c.SelectedQuestions(c.Base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name          string
+		probabilities map[string]float64
+		want          expression.Truth
+	}{
+		{"profile_only", map[string]float64{"profile.promotion": .99}, expression.Unknown},
+		{"promotion", map[string]float64{"profile.promotion": .99, "message.promotion": .99}, expression.True},
+		{"warning", map[string]float64{"profile.promotion": .99, "message.promotion": .99, "benign.warning": .99, "decision.fraud": .01}, expression.False},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, err := decision.EvaluatePolicy(q, c.Base, decision.Result{Probabilities: tc.probabilities})
+			if err != nil || e.Condition != tc.want {
+				t.Fatalf("unexpected example behavior: %+v %v", e, err)
+			}
+		})
 	}
 }
 
