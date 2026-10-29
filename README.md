@@ -170,7 +170,7 @@ export SYSTEMONE_API_KEY='替换成决策服务密钥'  # 本地服务关闭鉴�
 
 这是完整配置中的策略部分。示例群最终使用“600 秒内至少 3 条消息命中，禁言 120 秒”，其余参数继承共享值。
 `false` 和 `0` 按明确设置处理；删除覆盖项即可恢复继承。配置拒绝未知字段、重复键和 `null`。
-文件中的 `base.rules` 和 `questions` 一旦显式提供，就定义完整集合；省略时使用内建默认值。
+文件中的 `base.rules` 和顶层 `questions` 一旦显式提供，就定义完整集合；省略时使用内建默认值。
 例如 `/as_set base rules {}` 清空共享规则；群级 `rules` 继续逐规则、逐字段覆盖。
 
 | 参数 | 含义 |
@@ -192,6 +192,96 @@ export SYSTEMONE_API_KEY='替换成决策服务密钥'  # 本地服务关闭鉴�
 机器人自身、机器人所有者和群管理员保留自动处罚豁免，相关消息及判定结果照常留档。
 频道身份发言支持删除消息，成员禁言和踢人记录为不适用。
 
+### 问题组、自定义加减分与最终条件
+
+`examples/scoring.json` 是可直接校验的完整配置：包含 6 组共 24 道候选题，共享策略选用其中 9 道，两个群展示局部覆盖。复制后设置自己的所有者 ID、模型名和群 ID：
+
+```sh
+cp -n examples/scoring.json config.json
+chmod 600 config.json
+./antispam -config config.json -check
+```
+
+容器部署时将目标路径换成 `runtime/config.json`。示例保持 `mode: "record"`；权重和阈值用于试运行，使用本群样本评估后再开启处罚。
+
+- `question_groups.<组名>.<题名>` 定义题目，包含 `type`、`instructions` 和可选的正反标准或选项 `criteria`。
+- `base.questions` / `groups.<群ID>.questions` 选择单题，例如 `"message.promotion"`，或整组，例如 `"profile.*"`。数组整体替换；重复选择、空数组和未知题目在重载时拒绝。每群最多选 256 题。
+- 省略选题时继续使用原来的顶层 `questions`。旧配置、`-example` 生成的五题配置和单题概率规则保持兼容。
+- `scoring.initial` 是初始分；`scoring.rules` 是整组替换的加减分项数组，每项包含唯一的 `name`、布尔表达式 `when`、有符号数值 `add`。匹配项全部累计，负数扣分，最终总分允许为负数。
+- `condition` 是最终门槛。仅成立时进入已有的累计次数与动作处理；省略该字段保留原有规则行为。
+
+以下为完整配置里的策略片段；题库中需要定义并选中表达式引用的各题：
+
+```json
+{
+  "questions": ["profile.promotion", "message.promotion", "benign.warning", "decision.fraud"],
+  "scoring": {
+    "initial": 0,
+    "rules": [
+      {"name": "资料推广", "when": "p.profile.promotion >= 0.85", "add": 20},
+      {"name": "消息推广", "when": "p.message.promotion > 0.80", "add": 50},
+      {"name": "风险提醒", "when": "p.benign.warning >= 0.90", "add": -50}
+    ]
+  },
+  "condition": "score >= 60 || p.decision.fraud >= 0.98",
+  "rules": {
+    "delete": {"enabled": true, "count": 1, "action": "delete"},
+    "repeat": {"enabled": true, "count": 3, "window_seconds": 600, "action": "mute", "duration_seconds": 600}
+  }
+}
+```
+
+这里的处置规则省略 `question` 和 `threshold`，以最终 `condition` 成立作为一次命中。继续保留 `question` 的旧规则还会检查该题概率门槛。每条消息在同一规则、同一计分定义下计一次；更改题目定义、计分或最终条件会启动独立的累计系列。处置次数、窗口和禁言时长的调整继续使用同一系列。
+
+表达式支持 `>`、`>=`、`<`、`<=`、`==`、`!=`、`&&`、`||`、`!` 和括号：
+
+| 引用 | 含义 |
+| --- | --- |
+| `p.message.fraud` | 是非题 `message.fraud` 的“是”概率 |
+| `p.context.kind.spam` | 选择题 `context.kind` 中 `spam` 选项的概率 |
+| `s.message.severity` | 评分题 `message.severity` 返回的期望等级，等级从 0 起算 |
+| `score` | bot 计算的总策略分，仅用于最终 `condition` |
+
+所有概率范围为 `[0,1]`。组名、题名和选择题选项名使用英文字母开头、最多 64 位的字母数字下划线标识符。每项 `when` 独立读取答案；计分顺序保持无关。表达式按类型和已选题目预先校验，函数调用、任意代码和算术表达式会被拒绝。每个表达式最多 4096 字节，每份策略最多 128 个计分项。
+
+### 置信度与逐题弃答
+
+共享和群级策略支持：
+
+```json
+{
+  "min_confidence": 0.75,
+  "on_low_confidence": "abstain_question"
+}
+```
+
+**是非题 `noul` 直接使用概率阈值**：例如 `p.message.fraud > 0.9`，返回有效概率即可参与计分，`confidence` 对它的采用状态没有影响。
+
+**选择题 `choice` 和评分题 `score` 使用服务返回的 `confidence`**：低于阈值或缺少该字段时，将这道题记为 `unknown`。等于阈值时采用。默认阈值为 `0`，此时服务仍需提供有效的置信度。bot 只使用服务原值，概率和置信度分别留档。
+
+两种题型的定义示例，可放入某个问题组：
+
+```json
+{
+  "kind": {
+    "type": "choice",
+    "instructions": "当前作者的主要发言用途是什么？",
+    "criteria": {"spam": "主动广告或引流", "ham": "正常讨论或风险提醒", "other": "其他用途"}
+  },
+  "severity": {
+    "type": "score",
+    "instructions": "当前消息呈现的诈骗诱导程度有多高？",
+    "criteria": ["正常交流", "存在可疑招揽", "明确诱导交出凭据或转移资产"]
+  }
+}
+```
+
+弃答属于一次成功的推理结果，队列完成处理并保留原始答案。引用弃答题的计分项整项跳过；即使该项的 `when` 存在其他成立的 OR 分支，仍整项跳过。其余加减分项照常累计。
+
+最终 `condition` 使用三值逻辑：`true`、`false`、`unknown`。`true || unknown` 为 `true`，`false && unknown` 为 `false`，其余依赖未知答案的结果保留 `unknown`；对 `unknown` 取反仍为 `unknown`。只有 `true` 触发动作。所有分数、逐项命中或跳过原因、最终条件结果均保存到 `evaluations` 表。
+
+题库按实际材料选用：当前输入包含可获取的资料、完整消息、回复与引用；`crosslink.repeated_promotion` 需要额外提供本群近期记录，因此示例共享策略暂时排除该题。涉及个人频道、可信身份或群规的题目也应按已提供的材料与群内场景启用或调整。题目数量与识别效果需要通过实际样本验证。
+
 ## Telegram 管理命令
 
 群内命令可加上 `@机器人用户名` 后缀。普通群成员的命令形状消息继续参与检测。
@@ -202,6 +292,10 @@ export SYSTEMONE_API_KEY='替换成决策服务密钥'  # 本地服务关闭鉴�
 | `/as_config` | 群管理员：查看本群最终配置及本群覆盖项 |
 | `/as_set mode "record"` | 群管理员：切换本群模式，启用处罚时改为 `"enforce"` |
 | `/as_set queue_limit 50` | 群管理员：修改本群待判容量，缩小时立即淘汰最旧待判版本 |
+| `/as_set questions ["message.promotion","decision.fraud"]` | 群管理员：替换本群选题；计分和条件引用需要与新选题一致 |
+| `/as_set condition "score >= 75"` | 群管理员：修改最终处置门槛 |
+| `/as_set min_confidence 0.85` | 群管理员：修改选择题与评分题的置信度门槛 |
+| `/as_set scoring.rules [{"name":"诈骗","when":"p.decision.fraud > 0.9","add":80}]` | 群管理员：替换本群加减分项 |
 | `/as_set rules.repeat.duration_seconds 120` | 群管理员：修改本群某条规则的参数 |
 | `/as_reset rules.repeat.duration_seconds` | 群管理员：恢复该参数的共享继承 |
 | `/as_status` | 群管理员：查看本群版本处理统计 |
@@ -220,6 +314,7 @@ export SYSTEMONE_API_KEY='替换成决策服务密钥'  # 本地服务关闭鉴�
 手工编辑文件后执行 `/as_reload`；文件校验失败时继续使用当前配置。
 命令检测到文件已被外部修改时会要求先重载，保护手工编辑的内容。
 数据库位置和 Telegram 连接设置的变更在重启后生效；模型连接、题目及策略支持重载。
+问题组定义通过服务器配置文件修改后执行 `/as_reload`。选题、计分项和条件需要同时调整时，推荐一次编辑文件并校验重载，保持整份配置有效。
 
 ## 消息材料与模型协议
 
@@ -232,8 +327,8 @@ export SYSTEMONE_API_KEY='替换成决策服务密钥'  # 本地服务关闭鉴�
 Telegram Bot API 对其他机器人直接发送的群消息存在接收限制，用户经由 inline bot 发布的消息属于检测范围。
 
 默认问题是：推广意图、诈骗诱导、黑灰产招揽、正常讨论语境、最终违规判断。
-`questions` 可在配置中修改或扩展，每题使用 `type: "noul"` 和 `instructions`。
-客户端发送 `state`、`model`、`questions`，使用 `answers.<题目>.noul` 作为概率，并验证模型名、答案完整性和 `[0,1]` 范围。
+顶层 `questions` 或 `question_groups` 可在配置中修改或扩展，支持 `noul`、`choice`、`score`，每题包含 `instructions`。`noul` 的 `criteria` 可省略；提供时包含 `true`、`false` 两项说明。`choice` 包含 2–255 个选项；`score` 包含 2–10 个从低到高的等级说明。
+客户端发送 `state`、`model`、已选 `questions`，保留题目标准，验证模型名、答案类型、完整性、概率分布和等级范围。协议错误仍进入失败重试；合法答案的低置信度按逐题弃答处理。
 所有问题共同使用这条消息的材料，各题独立作答。
 
 每次编辑创建新版本并重新排队。队列中保留的版本逐一判断；旧版本结果用于留档，最新版本负责触发统计和处罚。
@@ -258,12 +353,14 @@ SQLite 中的主要表：
 | --- | --- |
 | `updates` | Telegram 原始更新，接收后先持久保存再推进轮询位置 |
 | `revisions` | 每个消息版本、策略快照、模型输入和队列状态 |
-| `attempts` | 每次模型请求、完整响应、概率、错误和耗时 |
+| `attempts` | 每次模型请求、完整响应、是非题概率、错误和耗时 |
+| `evaluations` | 每次成功推理的原始题目结果、服务置信度、有效/弃答状态、逐项计分、总分和三值条件，按 `attempt_id` 关联 |
 | `hits` | 按消息去重的规则触发历史 |
 | `actions` | 拟采取的动作、实际执行状态及错误 |
 | `annotations` | 人工标注历史及原消息快照 |
 
 日志写入标准错误，使用 JSON 格式。令牌和 API 密钥通过环境变量读取。
+数据库从版本 1 自动升级到版本 2，既有消息、模型尝试、队列和动作记录全部保留；历史尝试保持原始记录，新推理开始附带计分审计。
 数据库包含群消息和用户资料，文件权限为 `0600`，默认持续保留全部记录。
 运行中备份请使用 SQLite 的备份能力；停机复制时一并保留数据库及尚存的 WAL 文件。
 
