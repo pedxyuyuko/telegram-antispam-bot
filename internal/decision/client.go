@@ -1,4 +1,4 @@
-// Package decision implements the System One noul probability contract.
+// Package decision implements the System One typed decision contract.
 package decision
 
 import (
@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,7 +25,17 @@ type Result struct {
 	Request       []byte
 	Response      []byte
 	Probabilities map[string]float64
+	Answers       map[string]Answer
 	Duration      time.Duration
+}
+
+type Answer struct {
+	Type          string             `json:"type"`
+	Noul          *float64           `json:"noul,omitempty"`
+	Choice        string             `json:"choice,omitempty"`
+	Score         *float64           `json:"score,omitempty"`
+	Probabilities map[string]float64 `json:"probabilities,omitempty"`
+	Confidence    *float64           `json:"confidence,omitempty"`
 }
 
 func (c *Client) Evaluate(ctx context.Context, cfg config.Model, questions map[string]config.Question, state json.RawMessage) (result Result, err error) {
@@ -80,19 +91,91 @@ func (c *Client) Evaluate(ctx context.Context, cfg config.Model, questions map[s
 		return result, errors.New("model response name does not match request")
 	}
 	result.Probabilities = make(map[string]float64, len(questions))
-	for id := range questions {
-		var answer struct {
-			Type string   `json:"type"`
-			Noul *float64 `json:"noul"`
+	result.Answers = make(map[string]Answer, len(questions))
+	for id, question := range questions {
+		answer, err := parseAnswer(body.Answers[id], question)
+		if err != nil {
+			return result, fmt.Errorf("question %s: %w", id, err)
 		}
-		if err := json.Unmarshal(body.Answers[id], &answer); err != nil || answer.Type != "noul" || answer.Noul == nil {
-			return result, fmt.Errorf("question %s: missing or invalid noul answer", id)
+		result.Answers[id] = answer
+		if answer.Type == "noul" {
+			result.Probabilities[id] = *answer.Noul
 		}
-		p := *answer.Noul
-		if math.IsNaN(p) || math.IsInf(p, 0) || p < 0 || p > 1 {
-			return result, fmt.Errorf("question %s: probability outside [0,1]", id)
-		}
-		result.Probabilities[id] = p
 	}
 	return result, nil
+}
+
+func probability(p float64) bool { return !math.IsNaN(p) && !math.IsInf(p, 0) && p >= 0 && p <= 1 }
+
+func parseAnswer(raw json.RawMessage, q config.Question) (Answer, error) {
+	var a Answer
+	if err := json.Unmarshal(raw, &a); err != nil || a.Type != q.Type {
+		return a, errors.New("missing or invalid typed answer")
+	}
+	if a.Confidence != nil && !probability(*a.Confidence) {
+		return a, errors.New("confidence outside [0,1]")
+	}
+	if q.Type == "noul" {
+		if a.Noul == nil || !probability(*a.Noul) {
+			return a, errors.New("missing noul probability or value outside [0,1]")
+		}
+		return a, nil
+	}
+	var options map[string]string
+	if q.Type == "choice" {
+		if err := json.Unmarshal(q.Criteria, &options); err != nil {
+			return a, err
+		}
+		if _, ok := options[a.Choice]; !ok {
+			return a, errors.New("choice is not a declared option")
+		}
+	} else if q.Type == "score" {
+		var levels []string
+		if err := json.Unmarshal(q.Criteria, &levels); err != nil {
+			return a, err
+		}
+		options = map[string]string{}
+		for i, level := range levels {
+			options[strconv.Itoa(i)] = level
+		}
+		if a.Score == nil || math.IsNaN(*a.Score) || math.IsInf(*a.Score, 0) || *a.Score < 0 || *a.Score > float64(len(levels)-1) {
+			return a, errors.New("score outside declared levels")
+		}
+	} else {
+		return a, errors.New("unsupported answer type")
+	}
+	// Keep null distinct from a real zero; json.Unmarshal into float64 maps
+	// otherwise silently turns a null probability into zero.
+	var nullable struct {
+		Probabilities map[string]*float64 `json:"probabilities"`
+	}
+	if err := json.Unmarshal(raw, &nullable); err != nil {
+		return a, err
+	}
+	if len(nullable.Probabilities) != len(options) {
+		return a, errors.New("probabilities do not match declared options")
+	}
+	var total, expected, highest float64
+	for option := range options {
+		p := nullable.Probabilities[option]
+		if p == nil || !probability(*p) {
+			return a, errors.New("missing or invalid option probability")
+		}
+		total += *p
+		highest = math.Max(highest, *p)
+		if q.Type == "score" {
+			index, _ := strconv.Atoi(option)
+			expected += float64(index) * *p
+		}
+	}
+	if math.Abs(total-1) > 1e-5 {
+		return a, errors.New("option probabilities must sum to one")
+	}
+	if q.Type == "choice" && a.Probabilities[a.Choice] < highest-1e-5 {
+		return a, errors.New("choice contradicts option probabilities")
+	}
+	if q.Type == "score" && math.Abs(*a.Score-expected) > 1e-5 {
+		return a, errors.New("score contradicts option probabilities")
+	}
+	return a, nil
 }

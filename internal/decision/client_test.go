@@ -78,3 +78,63 @@ func TestHTTPFailureAndCancellationAreObservable(t *testing.T) {
 		t.Fatal("cancellation ignored")
 	}
 }
+
+func TestTypedAnswersPreserveServerConfidenceAndQuestionCriteria(t *testing.T) {
+	questions := map[string]config.Question{
+		"message.fraud":    {Type: "noul", Instructions: "fraud?", Criteria: json.RawMessage(`{"true":"scam","false":"chat"}`)},
+		"message.kind":     {Type: "choice", Instructions: "kind?", Criteria: json.RawMessage(`{"spam":"promotion","ham":"chat"}`)},
+		"message.severity": {Type: "score", Instructions: "severity?", Criteria: json.RawMessage(`["none","low","high"]`)},
+	}
+	body := `{"model":"m","answers":{"message.fraud":{"type":"noul","noul":0.98},"message.kind":{"type":"choice","choice":"spam","probabilities":{"spam":0.9,"ham":0.1},"confidence":0.2},"message.severity":{"type":"score","score":1.8,"probabilities":{"0":0.05,"1":0.1,"2":0.85}}}}`
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Questions map[string]config.Question `json:"questions"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		if len(payload.Questions) != 3 || !payload.Questions["message.fraud"].Equal(questions["message.fraud"]) {
+			t.Error("criteria or grouped names lost")
+		}
+		w.Write([]byte(body))
+	}))
+	defer s.Close()
+	result, err := (&Client{HTTP: s.Client()}).Evaluate(context.Background(), config.Model{BaseURL: s.URL, Name: "m", TimeoutSeconds: 2}, questions, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Probabilities["message.fraud"] != .98 || result.Answers["message.fraud"].Confidence != nil {
+		t.Fatal("noul probability was replaced by inferred confidence")
+	}
+	if c := result.Answers["message.kind"].Confidence; c == nil || *c != .2 {
+		t.Fatal("server confidence was overwritten")
+	}
+	if result.Answers["message.severity"].Confidence != nil || *result.Answers["message.severity"].Score != 1.8 || string(result.Response) != body {
+		t.Fatal("missing confidence or raw evidence lost")
+	}
+}
+
+func TestMalformedTypedAnswersAreFailures(t *testing.T) {
+	for _, tc := range []struct{ typ, criteria, answer string }{
+		{"choice", `{"a":"A","b":"B"}`, `{"type":"choice","choice":"a","probabilities":{"a":0.8,"b":0.2},"confidence":1.1}`},
+		{"choice", `{"a":"A","b":"B"}`, `{"type":"choice","choice":"x","probabilities":{"a":0.8,"b":0.2}}`},
+		{"choice", `{"a":"A","b":"B"}`, `{"type":"choice","choice":"a","probabilities":{"a":0.8,"b":null}}`},
+		{"choice", `{"a":"A","b":"B"}`, `{"type":"choice","choice":"a","probabilities":{"a":0.8}}`},
+		{"choice", `{"a":"A","b":"B"}`, `{"type":"choice","choice":"a","probabilities":{"a":0.8,"b":0.8}}`},
+		{"choice", `{"a":"A","b":"B"}`, `{"type":"choice","choice":"b","probabilities":{"a":0.8,"b":0.2}}`},
+		{"score", `["none","high"]`, `{"type":"score","score":2,"probabilities":{"0":0.2,"1":0.8}}`},
+		{"score", `["none","high"]`, `{"type":"score","probabilities":{"0":0.2,"1":0.8}}`},
+		{"score", `["none","high"]`, `{"type":"score","score":0.2,"probabilities":{"0":0.2,"1":0.8}}`},
+	} {
+		t.Run(tc.answer, func(t *testing.T) {
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte(`{"model":"m","answers":{"q":` + tc.answer + `}}`))
+			}))
+			defer s.Close()
+			_, err := (&Client{HTTP: s.Client()}).Evaluate(context.Background(), config.Model{BaseURL: s.URL, Name: "m", TimeoutSeconds: 2}, map[string]config.Question{"q": {Type: tc.typ, Instructions: "?", Criteria: json.RawMessage(tc.criteria)}}, json.RawMessage(`{}`))
+			if err == nil {
+				t.Fatal("malformed answer accepted")
+			}
+		})
+	}
+}
