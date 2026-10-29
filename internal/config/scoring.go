@@ -1,7 +1,6 @@
 package config
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -20,12 +19,6 @@ type ScoreRule struct {
 	Name string  `json:"name"`
 	When string  `json:"when"`
 	Add  float64 `json:"add"`
-}
-
-func (q Question) Equal(other Question) bool {
-	a, _ := json.Marshal(q)
-	b, _ := json.Marshal(other)
-	return bytes.Equal(a, b)
 }
 
 func (q Question) Validate() error {

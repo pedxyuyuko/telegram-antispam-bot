@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -93,7 +94,7 @@ func TestTypedAnswersPreserveServerConfidenceAndQuestionCriteria(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Error(err)
 		}
-		if len(payload.Questions) != 3 || !payload.Questions["message.fraud"].Equal(questions["message.fraud"]) {
+		if len(payload.Questions) != 3 || !reflect.DeepEqual(payload.Questions["message.fraud"], questions["message.fraud"]) {
 			t.Error("criteria or grouped names lost")
 		}
 		w.Write([]byte(body))
