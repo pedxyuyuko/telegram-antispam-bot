@@ -126,6 +126,7 @@ func TestMalformedTypedAnswersAreFailures(t *testing.T) {
 		{"score", `["none","high"]`, `{"type":"score","score":2,"probabilities":{"0":0.2,"1":0.8}}`},
 		{"score", `["none","high"]`, `{"type":"score","probabilities":{"0":0.2,"1":0.8}}`},
 		{"score", `["none","high"]`, `{"type":"score","score":0.2,"probabilities":{"0":0.2,"1":0.8}}`},
+		{"score", `["none","high"]`, `{"type":"score","score":0.8,"probabilities":{"0":0.2,"1":0.8},"confidence":-1}`},
 	} {
 		t.Run(tc.answer, func(t *testing.T) {
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -135,6 +136,24 @@ func TestMalformedTypedAnswersAreFailures(t *testing.T) {
 			_, err := (&Client{HTTP: s.Client()}).Evaluate(context.Background(), config.Model{BaseURL: s.URL, Name: "m", TimeoutSeconds: 2}, map[string]config.Question{"q": {Type: tc.typ, Instructions: "?", Criteria: json.RawMessage(tc.criteria)}}, json.RawMessage(`{}`))
 			if err == nil {
 				t.Fatal("malformed answer accepted")
+			}
+		})
+	}
+}
+
+func TestNoulClientIgnoresConfidenceMetadataAndRetainsRawEvidence(t *testing.T) {
+	for _, confidence := range []string{`2`, `-1`, `"unused"`, `{"value":0.2}`, `1e999`, `null`} {
+		t.Run(confidence, func(t *testing.T) {
+			body := `{"model":"m","answers":{"q":{"type":"noul","noul":0.9,"confidence":` + confidence + `},"kind":{"type":"choice","choice":"spam","probabilities":{"spam":0.9,"ham":0.1},"confidence":0.8}}}`
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(body)) }))
+			defer s.Close()
+			questions := map[string]config.Question{"q": {Type: "noul", Instructions: "risk?"}, "kind": {Type: "choice", Instructions: "kind?", Criteria: json.RawMessage(`{"spam":"ad","ham":"chat"}`)}}
+			result, err := (&Client{HTTP: s.Client()}).Evaluate(context.Background(), config.Model{BaseURL: s.URL, Name: "m", TimeoutSeconds: 2}, questions, json.RawMessage(`{}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Probabilities["q"] != .9 || len(result.Answers) != 2 || string(result.Response) != body {
+				t.Fatal("noul metadata blocked valid answers or discarded evidence")
 			}
 		})
 	}

@@ -108,18 +108,34 @@ func (c *Client) Evaluate(ctx context.Context, cfg config.Model, questions map[s
 func probability(p float64) bool { return !math.IsNaN(p) && !math.IsInf(p, 0) && p >= 0 && p <= 1 }
 
 func parseAnswer(raw json.RawMessage, q config.Question) (Answer, error) {
+	if q.Type == "noul" {
+		var core struct {
+			Type       string          `json:"type"`
+			Noul       *float64        `json:"noul"`
+			Confidence json.RawMessage `json:"confidence"`
+		}
+		if err := json.Unmarshal(raw, &core); err != nil || core.Type != "noul" {
+			return Answer{}, errors.New("missing or invalid noul answer")
+		}
+		a := Answer{Type: core.Type, Noul: core.Noul}
+		if a.Noul == nil || !probability(*a.Noul) {
+			return a, errors.New("missing noul probability or value outside [0,1]")
+		}
+		// Noul depends only on its probability. Optional confidence metadata is
+		// copied when numeric; every original field remains in Result.Response.
+		if len(core.Confidence) > 0 {
+			if err := json.Unmarshal(core.Confidence, &a.Confidence); err != nil {
+				a.Confidence = nil
+			}
+		}
+		return a, nil
+	}
 	var a Answer
 	if err := json.Unmarshal(raw, &a); err != nil || a.Type != q.Type {
 		return a, errors.New("missing or invalid typed answer")
 	}
 	if a.Confidence != nil && !probability(*a.Confidence) {
 		return a, errors.New("confidence outside [0,1]")
-	}
-	if q.Type == "noul" {
-		if a.Noul == nil || !probability(*a.Noul) {
-			return a, errors.New("missing noul probability or value outside [0,1]")
-		}
-		return a, nil
 	}
 	var options map[string]string
 	if q.Type == "choice" {
