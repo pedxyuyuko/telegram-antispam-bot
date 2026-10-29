@@ -102,3 +102,17 @@ func TestConfidentScoreUsesExpectedLevelAndCanProduceNegativeTotal(t *testing.T)
 		t.Fatalf("score answer was lost or total clamped: %+v", e)
 	}
 }
+
+func TestCollidingVariablesCannotMaskAnAbstainedAnswer(t *testing.T) {
+	q := map[string]config.Question{
+		"kind":      {Type: "choice", Instructions: "kind?", Criteria: json.RawMessage(`{"spam":"ad","ham":"chat"}`)},
+		"kind.spam": {Type: "noul", Instructions: "spam?"},
+	}
+	p := config.Policy{MinConfidence: .75, Scoring: &config.Scoring{Rules: []config.ScoreRule{{Name: "ad", When: "p.kind.spam > 0.9", Add: 60}}}, Condition: "score >= 60"}
+	for _, confidence := range []float64{.1, .99} {
+		r := Result{Answers: map[string]Answer{"kind": {Type: "choice", Choice: "ham", Probabilities: map[string]float64{"ham": .99, "spam": .01}, Confidence: number(confidence)}, "kind.spam": {Type: "noul", Noul: number(.99)}}}
+		if _, err := EvaluatePolicy(q, p, r); err == nil {
+			t.Fatal("ambiguous archived policy evaluated")
+		}
+	}
+}

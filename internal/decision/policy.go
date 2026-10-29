@@ -34,6 +34,10 @@ type Evaluation struct {
 // per-question abstentions, then computes independent terms and the final gate.
 func EvaluatePolicy(questions map[string]config.Question, p config.Policy, result Result) (Evaluation, error) {
 	e := Evaluation{Answers: map[string]EffectiveAnswer{}, Values: map[string]float64{}, Terms: []Term{}, Condition: expression.True}
+	variables, err := config.Variables(questions)
+	if err != nil {
+		return e, err
+	}
 	for id, q := range questions {
 		a, present := result.Answers[id]
 		// Older callers and archived workflows may only carry noul probabilities.
@@ -71,7 +75,6 @@ func EvaluatePolicy(questions map[string]config.Question, p config.Policy, resul
 		}
 		e.Answers[id] = effective
 	}
-	variables := config.Variables(questions)
 	if p.Scoring != nil {
 		e.Score = p.Scoring.Initial
 		for _, rule := range p.Scoring.Rules {

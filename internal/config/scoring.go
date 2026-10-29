@@ -118,7 +118,7 @@ func (c Config) SelectedQuestions(p Policy) (map[string]Question, error) {
 
 // Variables describes numeric expression references. Score questions expose the
 // model's expected level as s.<question>; score is the bot's separate total.
-func Variables(questions map[string]Question) []string {
+func Variables(questions map[string]Question) ([]string, error) {
 	var out []string
 	for id, q := range questions {
 		switch q.Type {
@@ -135,7 +135,12 @@ func Variables(questions map[string]Question) []string {
 		}
 	}
 	sort.Strings(out)
-	return out
+	for i := 1; i < len(out); i++ {
+		if out[i] == out[i-1] {
+			return nil, fmt.Errorf("selected questions produce conflicting variable %q", out[i])
+		}
+	}
+	return out, nil
 }
 
 func (p Policy) validateScoring(questions map[string]Question) error {
@@ -145,7 +150,10 @@ func (p Policy) validateScoring(questions map[string]Question) error {
 	if p.OnLowConfidence != "" && p.OnLowConfidence != "abstain_question" {
 		return fmt.Errorf("on_low_confidence must be abstain_question")
 	}
-	variables := Variables(questions)
+	variables, err := Variables(questions)
+	if err != nil {
+		return err
+	}
 	if p.Condition != "" {
 		if _, err := expression.Compile(p.Condition, variables, true); err != nil {
 			return fmt.Errorf("condition: %w", err)

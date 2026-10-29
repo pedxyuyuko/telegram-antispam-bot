@@ -99,3 +99,31 @@ func TestScoringEditsPersistAndResetToSharedConfig(t *testing.T) {
 		t.Fatal("accepted unknown question through command")
 	}
 }
+
+func TestRejectsCollidingAnswerVariablesAcrossFlatAndGroupedQuestions(t *testing.T) {
+	const raw = `{"owner_ids":[9],"model":{"name":"m"},"questions":{"kind":{"type":"choice","instructions":"kind?","criteria":{"spam":"ad","ham":"chat"}}},"question_groups":{"kind":{"spam":{"type":"noul","instructions":"spam?"}}},"base":{"questions":["kind"],"rules":{}}}`
+	if _, err := Decode([]byte(raw)); err != nil {
+		t.Fatalf("individually selected question failed: %v", err)
+	}
+	for _, selection := range []string{`["kind","kind.spam"]`, `["kind","kind.*"]`} {
+		if _, err := Decode([]byte(strings.Replace(raw, `["kind"]`, selection, 1))); err == nil {
+			t.Fatalf("accepted colliding selection %s", selection)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := int64(-100)
+	if err := m.Set(&chat, "questions", json.RawMessage(`["kind","kind.spam"]`)); err == nil {
+		t.Fatal("command activated ambiguous variables")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != raw {
+		t.Fatal("invalid selection changed disk configuration")
+	}
+}
