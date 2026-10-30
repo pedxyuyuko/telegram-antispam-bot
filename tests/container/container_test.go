@@ -297,6 +297,22 @@ func testPersistentRuntime(t *testing.T, useCompose bool) {
 	if !strings.Contains(archived, "retained") {
 		t.Fatal("container lost original fields")
 	}
+	logCtx, logCancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer logCancel()
+	runtimeLogs, err := containerCommand(logCtx, engine, "logs", containerName).CombinedOutput()
+	if err != nil {
+		t.Fatalf("read container logs: %v", err)
+	}
+	for _, event := range []string{`"level":"DEBUG"`, `"event":"model.answers"`, `"event":"policy.rules"`, `"event":"config.updated"`} {
+		if !bytes.Contains(runtimeLogs, []byte(event)) {
+			t.Fatalf("container omitted structured event %s", event)
+		}
+	}
+	for _, private := range []string{"123:container-test", "public profile", "sample advertisement", "future_field"} {
+		if bytes.Contains(runtimeLogs, []byte(private)) {
+			t.Fatalf("container logged private payload %s", private)
+		}
+	}
 }
 
 func wait(t *testing.T, condition func() bool, diagnostic func() string) {
