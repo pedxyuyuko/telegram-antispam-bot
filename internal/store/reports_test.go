@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -139,5 +140,41 @@ func TestFailedPersistenceDoesNotReturnACommittedReport(t *testing.T) {
 	}
 	if attempts != 0 || hits != 0 {
 		t.Fatal("failed decision was partially committed")
+	}
+}
+
+func TestIgnoringClaimedRevisionPreservesArchiveAndCannotReviveEviction(t *testing.T) {
+	for _, evict := range []bool{false, true} {
+		t.Run(fmt.Sprint(evict), func(t *testing.T) {
+			s := openTest(t)
+			p := config.Defaults().Base
+			p.QueueLimit = 1
+			id := add(t, s, 1, -100, 1, 42, p)
+			_, err := s.Claim(context.Background(), testNow)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if evict {
+				add(t, s, 2, -100, 2, 42, p)
+			}
+			changed, err := s.IgnoreRevision(context.Background(), id, "group_administrator")
+			if err != nil || changed == evict {
+				t.Fatalf("ignore result: %v %v", changed, err)
+			}
+			j, err := s.Revision(context.Background(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "ignored"
+			if evict {
+				want = "evicted"
+			}
+			if j.Status != want || len(j.Raw) == 0 || len(j.Snapshot.Questions) == 0 {
+				t.Fatalf("archive changed: %+v", j)
+			}
+			if !evict && j.Snapshot.SkipReason != "group_administrator" {
+				t.Fatal("skip reason lost")
+			}
+		})
 	}
 }

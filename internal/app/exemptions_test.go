@@ -4,8 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"telegram-antispam-bot/internal/decision"
+	"telegram-antispam-bot/internal/store"
+	"telegram-antispam-bot/internal/telegram"
 )
 
 func deliverRawMessage(t *testing.T, a *App, id int64, rawMessage string) {
@@ -88,5 +95,110 @@ func TestMemberForwardingAndRepliesToSyncedPostsRemainEligible(t *testing.T) {
 				t.Fatal("ordinary member forwarding/reply was exempted")
 			}
 		})
+	}
+}
+
+func TestQueuedMessageRechecksAdministratorBeforeModel(t *testing.T) {
+	var role atomic.Value
+	role.Store("member")
+	a, path := appFixtureWithMembership(t, func() string { return role.Load().(string) })
+	modelFixture(t, a, path, nil)
+	deliver(t, a, 1, message(50, "queued before promotion"))
+	role.Store("administrator")
+	if worked, err := a.ProcessModel(context.Background(), time.Now()); err != nil || !worked {
+		t.Fatalf("queued exemption: %v %v", worked, err)
+	}
+	if scalar(t, path, `SELECT count(*) FROM attempts`) != 0 || scalar(t, path, `SELECT count(*) FROM revisions WHERE status='ignored' AND json_extract(snapshot,'$.skip_reason')='group_administrator'`) != 1 {
+		t.Fatal("queued administrator message was inferred")
+	}
+}
+
+func queueLegacySource(t *testing.T, a *App, raw string) int64 {
+	t.Helper()
+	var m telegram.Message
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		t.Fatal(err)
+	}
+	update := json.RawMessage(`{"update_id":1,"message":` + raw + `}`)
+	if err := a.Store.Capture(context.Background(), []json.RawMessage{update}); err != nil {
+		t.Fatal(err)
+	}
+	c := a.Config.Snapshot()
+	p := c.ForGroup(m.Chat.ID)
+	questions, err := c.SelectedQuestions(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := a.Store.AddRevision(context.Background(), store.Inbox{ID: 1, Raw: update, ReceivedAt: time.Now().UnixMilli()}, &m, store.Snapshot{Policy: p, Questions: questions}, "pending")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Store.MarkInbox(context.Background(), 1, ""); err != nil {
+		t.Fatal(err)
+	}
+	return r.ID
+}
+
+const queuedSync = `{"message_id":1,"chat":{"id":-100,"type":"supergroup"},"from":{"id":1087968824,"is_bot":true,"first_name":"channel"},"sender_chat":{"id":-200,"type":"channel"},"is_automatic_forward":true,"text":"previously queued channel sync"}`
+
+func TestPreviouslyQueuedAutomaticForwardIsArchivedWithoutInference(t *testing.T) {
+	a, path := appFixture(t, "member")
+	modelFixture(t, a, path, nil)
+	queueLegacySource(t, a, queuedSync)
+	if worked, err := a.ProcessModel(context.Background(), time.Now()); err != nil || !worked {
+		t.Fatalf("skip: %v %v", worked, err)
+	}
+	if scalar(t, path, `SELECT count(*) FROM attempts`) != 0 || scalar(t, path, `SELECT count(*) FROM revisions WHERE status='ignored' AND json_extract(snapshot,'$.skip_reason')='automatic_channel_forward'`) != 1 {
+		t.Fatal("queued channel sync was inferred")
+	}
+}
+
+func TestPreviouslyPlannedAutomaticForwardDeletionIsCancelled(t *testing.T) {
+	var deletes atomic.Int32
+	a, path := appFixture(t, "member", func(r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "deleteMessage") {
+			deletes.Add(1)
+		}
+	})
+	if err := a.Config.Set(nil, "mode", json.RawMessage(`"enforce"`)); err != nil {
+		t.Fatal(err)
+	}
+	queueLegacySource(t, a, queuedSync)
+	j, err := a.Store.Claim(context.Background(), time.Now())
+	if err != nil || j == nil {
+		t.Fatalf("claim: %v %v", j, err)
+	}
+	if _, err := a.Store.Finish(context.Background(), *j, decision.Result{Probabilities: map[string]float64{"violation": 1}}, nil, time.Now(), 10); err != nil {
+		t.Fatal(err)
+	}
+	if worked, err := a.ProcessAction(context.Background()); err != nil || !worked {
+		t.Fatalf("preflight: %v %v", worked, err)
+	}
+	if deletes.Load() != 0 || scalar(t, path, `SELECT count(*) FROM actions WHERE status='skipped'`) != 1 {
+		t.Fatal("pending action deleted an automatic channel forward")
+	}
+}
+
+func TestUnavailableMembershipPreservesInferenceAndPunishmentProtection(t *testing.T) {
+	var deletes atomic.Int32
+	a, path := appFixture(t, "", func(r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "deleteMessage") {
+			deletes.Add(1)
+		}
+	})
+	modelFixture(t, a, path, nil)
+	if err := a.Config.Set(nil, "mode", json.RawMessage(`"enforce"`)); err != nil {
+		t.Fatal(err)
+	}
+	deliver(t, a, 1, message(50, "unverified member"))
+	runModel(t, a, time.Now())
+	if scalar(t, path, `SELECT count(*) FROM attempts WHERE error=''`) != 1 {
+		t.Fatal("membership lookup failure discarded message")
+	}
+	if worked, err := a.ProcessAction(context.Background()); err != nil || !worked {
+		t.Fatalf("preflight: %v %v", worked, err)
+	}
+	if deletes.Load() != 0 || scalar(t, path, `SELECT count(*) FROM actions WHERE status='skipped'`) != 1 {
+		t.Fatal("unverified target punished")
 	}
 }

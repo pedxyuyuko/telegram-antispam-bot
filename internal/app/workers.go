@@ -23,6 +23,14 @@ func (a *App) ProcessModel(ctx context.Context, now time.Time) (bool, error) {
 	if err := json.Unmarshal(j.Raw, &m); err != nil {
 		return false, fmt.Errorf("read archived message %d: %w", j.ID, err)
 	}
+	if reason := a.exemption(ctx, &m, "", diagnostic); reason != "" {
+		marked, err := a.Store.IgnoreRevision(ctx, j.ID, reason)
+		if err != nil {
+			return false, err
+		}
+		debug(diagnostic, "model.skipped", "reason", reason, "archived_as_ignored", marked)
+		return true, nil
+	}
 	reused := len(j.State) > 0
 	if !reused {
 		debug(diagnostic, "context.started")
@@ -109,6 +117,10 @@ func (a *App) ProcessAction(ctx context.Context) (bool, error) {
 	var message telegram.Message
 	if err := json.Unmarshal(job.Raw, &message); err != nil {
 		return false, err
+	}
+	if message.IsAutomaticForward {
+		detail = "automatic channel forward is excluded"
+		return finish()
 	}
 	if message.SenderChat != nil && message.SenderChat.ID == message.Chat.ID {
 		detail = "anonymous group administrator is protected"

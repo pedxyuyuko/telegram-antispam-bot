@@ -50,7 +50,13 @@ func appFixtureWithMembership(t *testing.T, membership func() string, observe ..
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case strings.HasSuffix(r.URL.Path, "getChatMember"):
-			w.Write([]byte(`{"ok":true,"result":{"status":"` + membership() + `","user":{"id":42,"first_name":"u"}}}`))
+			role := membership()
+			if role == "" {
+				w.WriteHeader(http.StatusForbidden)
+				w.Write([]byte(`{"ok":false,"error_code":403,"description":"membership unavailable"}`))
+				return
+			}
+			w.Write([]byte(`{"ok":true,"result":{"status":"` + role + `","user":{"id":42,"first_name":"u"}}}`))
 		case strings.HasSuffix(r.URL.Path, "sendMessage"):
 			w.Write([]byte(`{"ok":true,"result":{"message_id":100,"chat":{"id":-100,"type":"supergroup"},"date":1}}`))
 		case strings.HasSuffix(r.URL.Path, "getChat"):

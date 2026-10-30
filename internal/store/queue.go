@@ -128,3 +128,17 @@ func (s *Store) Claim(ctx context.Context, now time.Time) (*Job, error) {
 	j.Status = "running"
 	return j, nil
 }
+
+// IgnoreRevision closes claimed work without creating an inference attempt.
+// An in-flight admission check must never resurrect an evicted revision.
+func (s *Store) IgnoreRevision(ctx context.Context, id int64, reason string) (bool, error) {
+	if reason == "" {
+		return false, errors.New("skip reason is required")
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE revisions SET status='ignored',snapshot=json_set(snapshot,'$.skip_reason',?) WHERE id=? AND status='running'`, reason, id)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n > 0, err
+}
