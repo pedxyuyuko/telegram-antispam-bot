@@ -104,14 +104,14 @@ func (a *App) ProcessInbox(ctx context.Context) (bool, error) {
 	}
 	name, args := a.identify(m)
 	diagnostic := a.diagnostics(m.Chat.ID, "message", m.ID, "update", in.ID)
-	debug(diagnostic, "message.received", "sender", m.SenderKey(), "edited", u.Edited != nil, "command", name, "text_bytes", len(m.Text), "caption_bytes", len(m.Caption), "has_reply", m.Reply != nil)
+	debug(diagnostic, "message.received", "sender", m.SenderKey(), "sender_is_bot", m.From != nil && m.From.IsBot, "edited", u.Edited != nil, "command", name, "text_bytes", len(m.Text), "caption_bytes", len(m.Caption), "has_reply", m.Reply != nil)
 	authorized := name != "" && a.authorized(ctx, m, name, args)
 	if name != "" {
 		debug(diagnostic, "command.authorization", "command", name, "allowed", authorized)
 	}
 	cfg := a.Config.Snapshot()
 	status := "ignored"
-	if m.IsGroup() && (m.SenderChat != nil || m.From == nil || !m.From.IsBot) && m.UserID() != a.Telegram.Me.ID {
+	if m.IsGroup() && m.UserID() != a.Telegram.Me.ID {
 		status = "pending"
 	}
 	if authorized {

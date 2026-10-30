@@ -180,6 +180,91 @@ func TestSenderChatWithTelegramFakeBotSenderIsStillInspected(t *testing.T) {
 	}
 }
 
+func TestOtherBotMessagesAreJudgedUnderTheGroupPolicy(t *testing.T) {
+	for _, mode := range []string{"record", "enforce"} {
+		t.Run(mode, func(t *testing.T) {
+			var deletions atomic.Int32
+			a, path := appFixture(t, "member", func(r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "deleteMessage") {
+					deletions.Add(1)
+				}
+			})
+			log := captureDebug(a)
+			modelFixture(t, a, path, nil)
+			if err := a.Config.Set(nil, "mode", json.RawMessage(`"`+mode+`"`)); err != nil {
+				t.Fatal(err)
+			}
+			if err := a.Config.Set(nil, "debug", json.RawMessage(`true`)); err != nil {
+				t.Fatal(err)
+			}
+			m := message(456, "promotion from another bot")
+			m.From.IsBot = true
+			m.From.Username = "source_bot"
+			deliver(t, a, 1, m)
+			runModel(t, a, time.Now())
+			if scalar(t, path, `SELECT count(*) FROM attempts WHERE error='' AND json_extract(request,'$.state.telegram_message.from.is_bot')=1`) != 1 {
+				t.Fatal("bot message or its source metadata was lost")
+			}
+			if scalar(t, path, `SELECT count(*) FROM revisions WHERE status='succeeded'`) != 1 {
+				t.Fatal("other bot message was skipped")
+			}
+			rows := events(t, log, "message.received")
+			if len(rows) != 1 || rows[0]["sender_is_bot"] != true {
+				t.Fatal("bot sender flag missing from receipt log")
+			}
+			worked, err := a.ProcessAction(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := int32(0)
+			if mode == "enforce" {
+				want = 1
+			}
+			if deletions.Load() != want || worked != (mode == "enforce") {
+				t.Fatalf("bot moderation ignored mode: deletes=%d worked=%v", deletions.Load(), worked)
+			}
+		})
+	}
+}
+
+func TestOwnBotAndPrivateBotMessagesStayOutsideInference(t *testing.T) {
+	for _, kind := range []string{"own_bot", "private_bot"} {
+		t.Run(kind, func(t *testing.T) {
+			a, path := appFixture(t, "member")
+			modelFixture(t, a, path, nil)
+			m := message(456, "bot output")
+			m.From.IsBot = true
+			if kind == "own_bot" {
+				m.From.ID = a.Telegram.Me.ID
+			} else {
+				m.Chat = telegram.Chat{ID: 456, Type: "private"}
+			}
+			deliver(t, a, 1, m)
+			if worked, err := a.ProcessModel(context.Background(), time.Now()); err != nil || worked {
+				t.Fatalf("unexpected inference: %v %v", worked, err)
+			}
+			if scalar(t, path, `SELECT count(*) FROM revisions WHERE status='ignored'`) != 1 || scalar(t, path, `SELECT count(*) FROM attempts`) != 0 {
+				t.Fatal("excluded message was lost or inferred")
+			}
+		})
+	}
+}
+
+func TestOtherBotCommandShapesDoNotGainAdministratorPrivileges(t *testing.T) {
+	a, path := appFixture(t, "member")
+	modelFixture(t, a, path, nil)
+	m := message(456, `/as_set mode "enforce"`)
+	m.From.IsBot = true
+	deliver(t, a, 1, m)
+	if a.Config.Snapshot().ForGroup(-100).Mode != "record" {
+		t.Fatal("untrusted bot changed group settings")
+	}
+	runModel(t, a, time.Now())
+	if scalar(t, path, `SELECT count(*) FROM revisions WHERE status='succeeded'`) != 1 {
+		t.Fatal("unauthorized bot command bypassed inspection")
+	}
+}
+
 func TestRunStopsAllLoopsOnCancellation(t *testing.T) {
 	started := make(chan struct{}, 1)
 	a, _ := appFixture(t, "member", func(r *http.Request) {

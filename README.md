@@ -324,7 +324,8 @@ chmod 600 config.json
 
 简介通过额外查询获取并短期缓存，查询结果附带获取状态；Telegram 返回的资料可用性受其接口限制。
 媒体消息保留 API 已提供的文字和元数据；图片、二维码、音视频内容识别属于后续范围。
-Telegram Bot API 对其他机器人直接发送的群消息存在接收限制，用户经由 inline bot 发布的消息属于检测范围。
+实际收到的其他机器人群消息、用户经由 inline bot 发布的消息均参与检测，原始 `from.is_bot` 标记和来源信息继续提供给模型。当前机器人自身发言保持留档过滤，经过权限验证的管理命令继续走管理流程。Telegram 决定具体的消息投递范围。
+更新程序后，新收到的其他机器人消息进入待判队列；历史上标为 `ignored` 的记录保持原始归档状态。
 
 默认问题是：推广意图、诈骗诱导、黑灰产招揽、正常讨论语境、最终违规判断。
 顶层 `questions` 或 `question_groups` 可在配置中修改或扩展，支持 `noul`、`choice`、`score`，每题包含 `instructions`。`noul` 的 `criteria` 可省略；提供时包含 `true`、`false` 两项说明。`choice` 包含 2–255 个选项；`score` 包含 2–10 个从低到高的等级说明。
@@ -374,7 +375,7 @@ SQLite 中的主要表：
 
 | `event` | 主要内容 |
 | --- | --- |
-| `message.received` / `message.archived` | 收到的消息与编辑标志、是否为管理命令、字节数、入库状态、重复更新、选题数量 |
+| `message.received` / `message.archived` | 收到的消息与编辑标志、发言者是否为机器人、是否为管理命令、字节数、入库状态、重复更新、选题数量 |
 | `queue.evicted` / `queue.resized` | 队列容量、实际淘汰数、触发原因；启动恢复和修改容量也会记录 |
 | `profile.started` / `profile.completed` / `profile.cache_hit` | 资料查询耗时、获取状态、缓存命中，以及是否获得简介或说明 |
 | `context.started` / `context.ready` | 判断材料是否复用数据库快照、材料字节数 |
