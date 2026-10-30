@@ -132,7 +132,7 @@ export SYSTEMONE_API_KEY='替换成决策服务密钥'  # 本地服务关闭鉴�
 推荐使用超级群；限时禁言依赖 Telegram 的超级群限制成员接口。
 程序使用 long polling；已有 webhook 时启动会提示先移除 webhook。
 
-`-check` 仅校验配置；`-example` 向标准输出打印包含 6 组 24 道候选题和计分规则的完整示例，与 `examples/scoring.json` 共用题库。示例嵌入二进制，任意工作目录和容器内均可生成。
+`-check` 仅校验配置；`-example` 向标准输出打印包含 6 组 22 道候选题和计分规则的完整示例，与 `examples/scoring.json` 共用题库。示例嵌入二进制，任意工作目录和容器内均可生成。
 数据库路径相对于配置文件所在目录解析，默认是 `data/bot.sqlite`。
 同一数据库由一个机器人进程独占；重启时会恢复已收到的更新和剩余待判任务。
 
@@ -194,7 +194,7 @@ export SYSTEMONE_API_KEY='替换成决策服务密钥'  # 本地服务关闭鉴�
 
 ### 问题组、自定义加减分与最终条件
 
-`examples/scoring.json` 是可直接校验的完整配置：包含 6 组共 24 道候选题，共享策略选用其中 9 道，两个群展示局部覆盖。复制后设置自己的所有者 ID、模型名和群 ID：
+`examples/scoring.json` 是可直接校验的完整配置：包含 6 组共 22 道候选题，共享策略选用其中 9 道，两个群展示局部覆盖。复制后设置自己的所有者 ID、模型名和群 ID：
 
 ```sh
 cp -n examples/scoring.json config.json

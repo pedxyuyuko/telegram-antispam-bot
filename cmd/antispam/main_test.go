@@ -69,11 +69,22 @@ func TestExampleProvidesGroupedScoringOutsideRepository(t *testing.T) {
 	if len(c.Questions) != 0 || c.Base.Scoring == nil || c.Base.Condition == "" {
 		t.Fatal("example still uses the legacy flat-question policy")
 	}
+	for _, removed := range []string{"benign.discussion", "benign.participation"} {
+		p := c.Base
+		p.Questions = []string{removed}
+		if _, err := c.SelectedQuestions(p); err == nil {
+			t.Fatalf("removed question %s remains selectable in the example", removed)
+		}
+	}
 	for _, group := range []string{"profile", "message", "entry", "crosslink", "benign", "decision"} {
 		p := c.Base
 		p.Questions = []string{group + ".*"}
 		questions, err := c.SelectedQuestions(p)
-		if err != nil || len(questions) != 4 {
+		want := 4
+		if group == "benign" {
+			want = 2
+		}
+		if err != nil || len(questions) != want {
 			t.Fatalf("incomplete question group %s: %v %v", group, questions, err)
 		}
 		for id, q := range questions {

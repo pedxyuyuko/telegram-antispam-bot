@@ -100,16 +100,6 @@
         "type": "noul",
         "instructions": "当前作者是否在提醒、举报、分析或批评其中的广告与诈骗内容？",
         "criteria": {"true": "作者的立场是风险提醒、举报、分析或批评。", "false": "作者实际在招揽、支持或推广这些内容。"}
-      },
-      "discussion": {
-        "type": "noul",
-        "instructions": "当前消息是否以讨论产品价格、使用体验或技术问题为主要目的？",
-        "criteria": {"true": "发言主要用于交流事实、体验、技术问题或解答。", "false": "发言主要用于销售、招揽客户或引流。"}
-      },
-      "participation": {
-        "type": "noul",
-        "instructions": "结合前后文，当前发言是否属于与群内交流相关的实质性参与？",
-        "criteria": {"true": "发言提供相关问题、解答、经验、事实或讨论。", "false": "发言主要投放无关推广或招揽内容。"}
       }
     },
     "decision": {
