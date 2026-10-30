@@ -63,7 +63,7 @@ rootless Podman 的默认用户命名空间把容器 UID/GID `0:0` 映射到运�
 ```
 
 将数字 ID 和模型名替换成实际值。`groups` 也可以设为 `{}`，让所有群使用共享配置。
-`base.mode=record` 是只记录模式；`base.debug=true` 把各题概率写入日志。
+`base.mode=record` 是只记录模式；`base.debug=true` 开启消息处理、模型结果和计分处置的调试日志。
 
 Compose 使用宿主机网络，本机模型服务可以填写 `http://127.0.0.1:8000`。
 远程服务填写它的实际地址，程序追加 `/v1/systemone`。
@@ -176,7 +176,7 @@ export SYSTEMONE_API_KEY='替换成决策服务密钥'  # 本地服务关闭鉴�
 | 参数 | 含义 |
 | --- | --- |
 | `mode` | `record` 保存判定及拟采取的动作；`enforce` 开启自动处罚 |
-| `debug` | 在服务器 JSON 日志中输出各题概率 |
+| `debug` | 输出本群的 DEBUG 阶段日志、各题结果、计分与处置依据；支持共享默认和群级覆盖 |
 | `queue_limit` | 本群最多保留的待判版本数，包括正在调用模型的版本；范围 1–100000 |
 | `rules.<名称>.enabled` | 启用或关闭这条规则 |
 | `question` / `threshold` | 使用哪道题的“是”概率；达到或超过阈值即命中 |
@@ -363,6 +363,52 @@ SQLite 中的主要表：
 数据库从版本 1 自动升级到版本 2，既有消息、模型尝试、队列和动作记录全部保留；历史尝试保持原始记录，新推理开始附带计分审计。
 数据库包含群消息和用户资料，文件权限为 `0600`，默认持续保留全部记录。
 运行中备份请使用 SQLite 的备份能力；停机复制时一并保留数据库及尚存的 WAL 文件。
+
+## 调试日志
+
+本群管理员使用 `/as_set debug true` 开启、`/as_set debug false` 关闭，`/as_reset debug` 恢复共享继承；所有者使用 `/as_set base debug true` 修改共享默认值。文件修改经 `/as_reload` 生效。开关按当前配置逐条检查，正在进行的请求也会采用更新后的设置。
+
+日志为逐行 JSON。`DEBUG` 用于详细诊断；配置修改、人工标注和处罚结果保留 `INFO` 记录，模型失败保留 `WARN`，严重错误保留 `ERROR`。只记录模式同样输出完整的判定诊断，拟执行动作的状态为 `recorded`。
+
+用 `chat`、`message`、`revision`、`update` 串联同一条消息的处理；结果保存后附带模型尝试 ID `attempt`，处罚日志附带 `action_id`。首次接收时用 `update` 关联，入库后补充 `revision`。
+
+| `event` | 主要内容 |
+| --- | --- |
+| `message.received` / `message.archived` | 收到的消息与编辑标志、是否为管理命令、字节数、入库状态、重复更新、选题数量 |
+| `queue.evicted` / `queue.resized` | 队列容量、实际淘汰数、触发原因；启动恢复和修改容量也会记录 |
+| `profile.started` / `profile.completed` / `profile.cache_hit` | 资料查询耗时、获取状态、缓存命中，以及是否获得简介或说明 |
+| `context.started` / `context.ready` | 判断材料是否复用数据库快照、材料字节数 |
+| `model.claimed` / `model.started` / `model.completed` | 排队时间、模型名、题目列表、超时设置、调用耗时、请求及响应字节数 |
+| `model.answers` | 各题概率、服务置信度、有效或弃答状态与原因 |
+| `policy.scored` | 总分、各加减分项的命中／跳过情况、最终条件表达式及三值结果 |
+| `policy.rules` | 处置规则的实际累计次数、要求次数、时间窗口、消息是否首次计数、未达到条件的原因 |
+| `model.archived` | 保存后的版本状态和原因，可区分正常完成、失败待重试、版本被替代及队列淘汰 |
+| `model.failed` / `model.retry_scheduled` | 模型错误、实际版本状态和下一次模型重试时间；退避作用于模型处理循环 |
+| `action.planned` | 拟执行动作 ID、命中规则、只记录或待执行状态、禁言截止时间 |
+| `action.preflight` / `action.membership` / `action.dispatching` / `action.completed` | 执行前复核、成员状态、开始调用、实际结果，以及保护管理员、配置变更或消息编辑等跳过原因 |
+| `config.updated` / `config.reset` / `config.reloaded` / `config.rejected` | 配置作用域、操作人、参数路径、成功操作及拒绝原因；配置值留在配置文件和命令记录中 |
+| `command.authorization` / `annotation.recorded` | 命令权限检查、人工标注的目标消息与标签 |
+
+常规诊断输出阶段元数据和判定结果，消息正文、个人简介、完整请求和模型响应继续通过数据库留档。Telegram 错误中的 bot Token 会脱敏。空闲轮询保持静默。
+
+下面是只记录模式的日志示意，省略部分字段：
+
+```json
+{"level":"DEBUG","event":"model.started","chat":-1001234567890,"message":42,"revision":100,"question_count":9,"timeout_seconds":20}
+{"level":"DEBUG","event":"policy.scored","chat":-1001234567890,"message":42,"revision":100,"attempt":101,"score":75,"condition_result":"true"}
+{"level":"DEBUG","event":"action.planned","chat":-1001234567890,"message":42,"revision":100,"attempt":101,"action_id":12,"action":"delete","status":"recorded"}
+```
+
+直接运行时，终端可实时看到日志；也可以追加到本地文件：
+
+```sh
+mkdir -p logs
+chmod 700 logs
+umask 077
+./antispam -config config.json 2>>logs/antispam.jsonl
+```
+
+Compose 部署使用 `docker compose logs -f antispam` 查看。日志字段中的数值是实际计分和持久化结果；模型识别准确率仍需结合人工标注评估。
 
 ## 验证
 
