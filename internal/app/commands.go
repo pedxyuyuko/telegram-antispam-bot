@@ -200,7 +200,7 @@ func (a *App) command(ctx context.Context, updateID int64, m *telegram.Message, 
 		if err := a.Config.Set(chat, path, json.RawMessage(value)); err != nil {
 			return "配置修改失败：" + err.Error(), nil
 		}
-		if err := a.Store.Resize(ctx, a.Config.Snapshot()); err != nil {
+		if _, err := a.Store.Resize(ctx, a.Config.Snapshot()); err != nil {
 			return "", err
 		}
 		return "配置已生效并写回文件。", nil
@@ -211,7 +211,7 @@ func (a *App) command(ctx context.Context, updateID int64, m *telegram.Message, 
 		if err := a.Config.Reset(m.Chat.ID, strings.TrimSpace(args)); err != nil {
 			return "恢复失败：" + err.Error(), nil
 		}
-		if err := a.Store.Resize(ctx, a.Config.Snapshot()); err != nil {
+		if _, err := a.Store.Resize(ctx, a.Config.Snapshot()); err != nil {
 			return "", err
 		}
 		return "该参数已恢复继承共享配置。", nil
@@ -219,7 +219,7 @@ func (a *App) command(ctx context.Context, updateID int64, m *telegram.Message, 
 		if err := a.Config.Reload(); err != nil {
 			return "重载失败，继续使用当前配置：" + err.Error(), nil
 		}
-		if err := a.Store.Resize(ctx, a.Config.Snapshot()); err != nil {
+		if _, err := a.Store.Resize(ctx, a.Config.Snapshot()); err != nil {
 			return "", err
 		}
 		return "文件配置已校验并生效。", nil

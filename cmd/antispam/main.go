@@ -83,7 +83,7 @@ func run(ctx context.Context, args []string, out, logs io.Writer) (err error) {
 		return fmt.Errorf("database: %w", err)
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	if err := s.Resize(ctx, c); err != nil {
+	if _, err := s.Resize(ctx, c); err != nil {
 		return err
 	}
 	lastID, err := s.LastUpdateID(ctx)

@@ -32,7 +32,7 @@ func (a *App) ProcessModel(ctx context.Context, now time.Time) (bool, error) {
 	// A graceful stop still gets a short opportunity to save the last attempt.
 	persist, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if err := a.Store.Finish(persist, *j, result, inferenceErr, now.Add(time.Since(started)), cfg.Model.RetrySeconds); err != nil {
+	if _, err := a.Store.Finish(persist, *j, result, inferenceErr, now.Add(time.Since(started)), cfg.Model.RetrySeconds); err != nil {
 		return false, err
 	}
 	if inferenceErr != nil {

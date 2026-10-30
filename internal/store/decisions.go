@@ -14,7 +14,15 @@ import (
 	"telegram-antispam-bot/internal/expression"
 )
 
-func (s *Store) Finish(ctx context.Context, j Job, result decision.Result, inferenceErr error, now time.Time, retrySeconds int) error {
+func (s *Store) Finish(ctx context.Context, j Job, result decision.Result, inferenceErr error, now time.Time, retrySeconds int) (FinishReport, error) {
+	var report FinishReport
+	if err := s.finish(ctx, j, result, inferenceErr, now, retrySeconds, &report); err != nil {
+		return FinishReport{}, err
+	}
+	return report, nil
+}
+
+func (s *Store) finish(ctx context.Context, j Job, result decision.Result, inferenceErr error, now time.Time, retrySeconds int, report *FinishReport) error {
 	var evaluation decision.Evaluation
 	if inferenceErr == nil {
 		var err error
@@ -22,6 +30,7 @@ func (s *Store) Finish(ctx context.Context, j Job, result decision.Result, infer
 		if err != nil {
 			return fmt.Errorf("evaluate archived policy: %w", err)
 		}
+		report.Evaluation = &evaluation
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -37,16 +46,16 @@ func (s *Store) Finish(ctx context.Context, j Job, result decision.Result, infer
 	if err != nil {
 		return err
 	}
+	report.AttemptID, err = inserted.LastInsertId()
+	if err != nil {
+		return err
+	}
 	if inferenceErr == nil {
-		attemptID, err := inserted.LastInsertId()
-		if err != nil {
-			return err
-		}
 		raw, err := json.Marshal(evaluation)
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO evaluations(attempt_id,result) VALUES(?,?)`, attemptID, string(raw)); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO evaluations(attempt_id,result) VALUES(?,?)`, report.AttemptID, string(raw)); err != nil {
 			return err
 		}
 	}
@@ -54,8 +63,11 @@ func (s *Store) Finish(ctx context.Context, j Job, result decision.Result, infer
 	if err := tx.QueryRowContext(ctx, `SELECT status FROM revisions WHERE id=?`, j.ID).Scan(&status); err != nil {
 		return err
 	}
+	report.Status = status
 	if inferenceErr != nil {
 		next := now.Add(time.Duration(retrySeconds) * time.Second).UnixMilli()
+		report.RetryAt = next
+		report.Reason = "model_failed"
 		if _, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES('model_retry_at',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, next); err != nil {
 			return err
 		}
@@ -63,10 +75,12 @@ func (s *Store) Finish(ctx context.Context, j Job, result decision.Result, infer
 			if _, err := tx.ExecContext(ctx, `UPDATE revisions SET status='pending',available_at=? WHERE id=?`, next, j.ID); err != nil {
 				return err
 			}
+			report.Status = "pending"
 		}
 		return tx.Commit()
 	}
 	if status != "running" {
+		report.Reason = "revision_no_longer_running"
 		return tx.Commit()
 	}
 	var latest int64
@@ -77,12 +91,16 @@ func (s *Store) Finish(ctx context.Context, j Job, result decision.Result, infer
 		if _, err := tx.ExecContext(ctx, `UPDATE revisions SET status='superseded' WHERE id=?`, j.ID); err != nil {
 			return err
 		}
+		report.Status = "superseded"
+		report.Reason = "newer_revision_exists"
 		return tx.Commit()
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE revisions SET status='succeeded' WHERE id=?`, j.ID); err != nil {
 		return err
 	}
 	policy := j.Snapshot.Policy
+	report.Status = "succeeded"
+	report.Reason = "condition_" + string(evaluation.Condition)
 	if evaluation.Condition != expression.True {
 		return tx.Commit()
 	}
@@ -99,15 +117,35 @@ func (s *Store) Finish(ctx context.Context, j Job, result decision.Result, infer
 	for _, id := range ids {
 		r := policy.Rules[id]
 		p, present := evaluation.Values["p."+r.Question]
-		if !r.Enabled || (r.Question != "" && (!present || p < r.Threshold)) {
+		trace := RuleReport{ID: id, Question: r.Question, Threshold: r.Threshold, Required: r.Count, WindowSeconds: r.WindowSeconds}
+		if present {
+			trace.Probability = &p
+		}
+		if !r.Enabled {
+			trace.Status = "disabled"
+			report.Rules = append(report.Rules, trace)
+			continue
+		}
+		if r.Question != "" && (!present || p < r.Threshold) {
+			trace.Status = "below_probability"
+			if !present {
+				trace.Status = "unknown_answer"
+			}
+			report.Rules = append(report.Rules, trace)
 			continue
 		}
 		// Changing the question or threshold starts a separate evidence series;
 		// changing a punishment leaves the same underlying hit history usable.
 		key := decision.PolicyKey(policy, j.Snapshot.Questions, r)
-		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO hits(chat_id,message_id,sender,rule_id,rule_key,mode,occurred_at) VALUES(?,?,?,?,?,?,?)`, j.ChatID, j.MessageID, j.Sender, id, key, policy.Mode, j.ReceivedAt); err != nil {
+		hit, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO hits(chat_id,message_id,sender,rule_id,rule_key,mode,occurred_at) VALUES(?,?,?,?,?,?,?)`, j.ChatID, j.MessageID, j.Sender, id, key, policy.Mode, j.ReceivedAt)
+		if err != nil {
 			return err
 		}
+		added, err := hit.RowsAffected()
+		if err != nil {
+			return err
+		}
+		trace.NewHit = added > 0
 		cutoff := int64(0)
 		if r.WindowSeconds > 0 {
 			cutoff = now.Add(-time.Duration(r.WindowSeconds) * time.Second).UnixMilli()
@@ -117,8 +155,14 @@ func (s *Store) Finish(ctx context.Context, j Job, result decision.Result, infer
 			return err
 		}
 		if count < r.Count {
+			trace.Status = "below_count"
+			trace.Hits = count
+			report.Rules = append(report.Rules, trace)
 			continue
 		}
+		trace.Status = "eligible"
+		trace.Hits = count
+		report.Rules = append(report.Rules, trace)
 		old, ok := chosen[r.Action]
 		if !ok || r.DurationSeconds > old.rule.DurationSeconds {
 			chosen[r.Action] = candidate{id, r}
@@ -141,8 +185,20 @@ func (s *Store) Finish(ctx context.Context, j Job, result decision.Result, infer
 		if kind == "mute" {
 			until = now.Unix() + int64(c.rule.DurationSeconds)
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO actions(revision_id,chat_id,message_id,user_id,rule_id,rule,kind,mode,until_date,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, j.ID, j.ChatID, j.MessageID, j.UserID, c.id, string(rule), kind, policy.Mode, until, actionStatus, now.UnixMilli()); err != nil {
+		inserted, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO actions(revision_id,chat_id,message_id,user_id,rule_id,rule,kind,mode,until_date,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, j.ID, j.ChatID, j.MessageID, j.UserID, c.id, string(rule), kind, policy.Mode, until, actionStatus, now.UnixMilli())
+		if err != nil {
 			return err
+		}
+		added, err := inserted.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if added > 0 {
+			id, err := inserted.LastInsertId()
+			if err != nil {
+				return err
+			}
+			report.Actions = append(report.Actions, PlannedAction{ID: id, RuleID: c.id, Kind: kind, Status: actionStatus, Until: until})
 		}
 	}
 	return tx.Commit()

@@ -39,7 +39,7 @@ func add(t *testing.T, s *Store, update int64, chat int64, message int, user int
 	if err := s.MarkInbox(context.Background(), update, ""); err != nil {
 		t.Fatal(err)
 	}
-	return id
+	return id.ID
 }
 func finish(t *testing.T, s *Store, p float64) *Job {
 	t.Helper()
@@ -47,7 +47,7 @@ func finish(t *testing.T, s *Store, p float64) *Job {
 	if err != nil || j == nil {
 		t.Fatalf("claim: %+v %v", j, err)
 	}
-	err = s.Finish(context.Background(), *j, decision.Result{Request: []byte(`{"state":"sample"}`), Response: []byte(`{"kept":true}`), Probabilities: map[string]float64{"violation": p}}, nil, testNow, 10)
+	_, err = s.Finish(context.Background(), *j, decision.Result{Request: []byte(`{"state":"sample"}`), Response: []byte(`{"kept":true}`), Probabilities: map[string]float64{"violation": p}}, nil, testNow, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestFailureRequeuesBoundedlyAndSurvivesRestart(t *testing.T) {
 	p.QueueLimit = 2
 	first := add(t, s, 1, -100, 1, 42, p)
 	j, _ := s.Claim(context.Background(), testNow)
-	if err := s.Finish(context.Background(), *j, decision.Result{Request: []byte("request"), Response: []byte("503")}, errors.New("offline"), testNow, 10); err != nil {
+	if _, err := s.Finish(context.Background(), *j, decision.Result{Request: []byte("request"), Response: []byte("503")}, errors.New("offline"), testNow, 10); err != nil {
 		t.Fatal(err)
 	}
 	if j, _ := s.Claim(context.Background(), testNow.Add(9*time.Second)); j != nil {
@@ -132,7 +132,7 @@ func TestEditSupersedesInflightWorkAndCannotDoubleCount(t *testing.T) {
 	old := add(t, s, 1, -100, 7, 42, p)
 	j, _ := s.Claim(context.Background(), testNow)
 	newID := add(t, s, 2, -100, 7, 42, p)
-	if err := s.Finish(context.Background(), *j, decision.Result{Probabilities: map[string]float64{"violation": 1}}, nil, testNow, 10); err != nil {
+	if _, err := s.Finish(context.Background(), *j, decision.Result{Probabilities: map[string]float64{"violation": 1}}, nil, testNow, 10); err != nil {
 		t.Fatal(err)
 	}
 	oldJob, _ := s.Revision(context.Background(), old)

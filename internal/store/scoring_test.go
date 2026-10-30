@@ -70,7 +70,7 @@ func TestScoringRecordsUnknownConditionsWithoutRetryingOrPunishing(t *testing.T)
 			if err != nil || j == nil {
 				t.Fatalf("claim: %v %v", j, err)
 			}
-			if err := s.Finish(context.Background(), *j, scoredResult(tc.p, tc.confidence), nil, testNow, 10); err != nil {
+			if _, err := s.Finish(context.Background(), *j, scoredResult(tc.p, tc.confidence), nil, testNow, 10); err != nil {
 				t.Fatal(err)
 			}
 			var raw string
@@ -108,7 +108,7 @@ func TestScoringArchivesStaleAndEvictedEvaluationsWithoutHits(t *testing.T) {
 		addScoring(t, s, 1, 1, snap)
 		j, _ := s.Claim(context.Background(), testNow)
 		addScoring(t, s, 2, 1, snap)
-		if err := s.Finish(context.Background(), *j, scoredResult(.99, nil), nil, testNow, 10); err != nil {
+		if _, err := s.Finish(context.Background(), *j, scoredResult(.99, nil), nil, testNow, 10); err != nil {
 			t.Fatal(err)
 		}
 		var evaluations, hits int
@@ -129,7 +129,7 @@ func TestScoringCountDeduplicatesEditsAndSeparatesChangedFormula(t *testing.T) {
 	for i := int64(1); i <= 2; i++ {
 		addScoring(t, s, i, 1, snap)
 		j, _ := s.Claim(context.Background(), testNow)
-		if err := s.Finish(context.Background(), *j, scoredResult(.99, nil), nil, testNow, 10); err != nil {
+		if _, err := s.Finish(context.Background(), *j, scoredResult(.99, nil), nil, testNow, 10); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -139,7 +139,7 @@ func TestScoringCountDeduplicatesEditsAndSeparatesChangedFormula(t *testing.T) {
 	snap.Policy.Scoring.Rules[0].Add = 70
 	addScoring(t, s, 3, 2, snap)
 	j, _ := s.Claim(context.Background(), testNow)
-	if err := s.Finish(context.Background(), *j, scoredResult(.99, nil), nil, testNow, 10); err != nil {
+	if _, err := s.Finish(context.Background(), *j, scoredResult(.99, nil), nil, testNow, 10); err != nil {
 		t.Fatal(err)
 	}
 	if a, _ := s.TakeAction(context.Background()); a != nil {
@@ -147,7 +147,7 @@ func TestScoringCountDeduplicatesEditsAndSeparatesChangedFormula(t *testing.T) {
 	}
 	addScoring(t, s, 4, 3, snap)
 	j, _ = s.Claim(context.Background(), testNow)
-	if err := s.Finish(context.Background(), *j, scoredResult(.99, nil), nil, testNow, 10); err != nil {
+	if _, err := s.Finish(context.Background(), *j, scoredResult(.99, nil), nil, testNow, 10); err != nil {
 		t.Fatal(err)
 	}
 	if a, _ := s.TakeAction(context.Background()); a == nil || a.Kind != "mute" {
