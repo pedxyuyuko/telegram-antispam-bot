@@ -49,7 +49,7 @@ func (a *App) ProcessModel(ctx context.Context, now time.Time) (bool, error) {
 		diagnostic.Warn("model attempt failed", "event", "model.failed", "status", report.Status, "error", inferenceErr, "retry_at", time.UnixMilli(report.RetryAt))
 		debug(diagnostic, "model.retry_scheduled", "status", report.Status, "retry_at", time.UnixMilli(report.RetryAt), "retry_seconds", cfg.Model.RetrySeconds, "scope", "model")
 	} else {
-		debug(diagnostic, "model.answers", "probabilities", result.Probabilities, "answers", report.Evaluation.Answers)
+		debug(diagnostic, "model.answers", "probabilities", result.Probabilities, "answers", answerSummaries(j.Snapshot.Questions, report.Evaluation.Answers))
 		debug(diagnostic, "policy.scored", "score", report.Evaluation.Score, "condition", j.Snapshot.Policy.Condition, "condition_result", report.Evaluation.Condition, "terms", report.Evaluation.Terms)
 		debug(diagnostic, "policy.rules", "reason", report.Reason, "rules", report.Rules)
 		for _, action := range report.Actions {

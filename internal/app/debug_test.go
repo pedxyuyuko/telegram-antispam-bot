@@ -329,3 +329,40 @@ func TestConfigurationAuditSurvivesDisablingDebug(t *testing.T) {
 		t.Fatal("debug remained enabled")
 	}
 }
+
+func TestScoreDiagnosticsWhitelistFieldsAndKeepExtraTextOnlyInArchive(t *testing.T) {
+	a, path := appFixture(t, "member")
+	log := captureDebug(a)
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"model":"m","answers":{"risk":{"type":"score","score":0.9,"probabilities":{"0":0.1,"1":0.9},"confidence":0.9,"choice":"PRIVATE_MODEL_TEXT_PAYLOAD"}}}`))
+	}))
+	defer s.Close()
+	c := a.Config.Snapshot()
+	c.Model.BaseURL = s.URL
+	c.Base.Debug = true
+	c.Questions = map[string]config.Question{"risk": {Type: "score", Instructions: "risk?", Criteria: json.RawMessage(`["low","high"]`)}}
+	c.Base.Rules = map[string]config.Rule{}
+	c.Base.Scoring = &config.Scoring{Rules: []config.ScoreRule{{Name: "risk", When: "s.risk > 0.8", Add: 1}}}
+	c.Base.Condition = "score >= 1"
+	saveScoringConfig(t, a, path, c)
+	deliver(t, a, 1, message(50, "PRIVATE_ORIGINAL_MESSAGE"))
+	runModel(t, a, time.Now())
+	if strings.Contains(log.String(), "PRIVATE_MODEL_TEXT_PAYLOAD") || strings.Contains(log.String(), "PRIVATE_ORIGINAL_MESSAGE") {
+		t.Fatal("unused answer text leaked to debug logs")
+	}
+	rows := events(t, log, "model.answers")
+	if len(rows) != 1 {
+		t.Fatal("score diagnostics missing")
+	}
+	answers := rows[0]["answers"].(map[string]any)
+	risk := answers["risk"].(map[string]any)
+	if risk["score"] != .9 || risk["confidence"] != .9 || risk["status"] != "answered" {
+		t.Fatalf("numeric diagnostics lost: %v", risk)
+	}
+	if _, exists := risk["choice"]; exists {
+		t.Fatal("score summary included a choice field")
+	}
+	if scalar(t, path, `SELECT count(*) FROM attempts WHERE json_extract(response,'$.answers.risk.choice')='PRIVATE_MODEL_TEXT_PAYLOAD'`) != 1 {
+		t.Fatal("full response evidence was discarded")
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"telegram-antispam-bot/internal/config"
+	"telegram-antispam-bot/internal/decision"
 )
 
 // Gate every diagnostic event against the live group setting, including profile
@@ -41,6 +42,33 @@ func questionIDs(questions map[string]config.Question) []string {
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+// Project validated fields by requested type. Raw answers may contain extra
+// model-controlled text in fields belonging to another type; keep that in SQLite.
+func answerSummaries(questions map[string]config.Question, answers map[string]decision.EffectiveAnswer) map[string]any {
+	out := make(map[string]any, len(questions))
+	for id, q := range questions {
+		a := answers[id]
+		summary := map[string]any{"type": q.Type, "status": a.Status}
+		if a.Reason != "" {
+			summary["reason"] = a.Reason
+		}
+		switch q.Type {
+		case "noul":
+			summary["noul"] = a.Raw.Noul
+		case "choice":
+			summary["choice"] = a.Raw.Choice
+			summary["probabilities"] = a.Raw.Probabilities
+			summary["confidence"] = a.Raw.Confidence
+		case "score":
+			summary["score"] = a.Raw.Score
+			summary["probabilities"] = a.Raw.Probabilities
+			summary["confidence"] = a.Raw.Confidence
+		}
+		out[id] = summary
+	}
+	return out
 }
 
 func (a *App) resizeQueues(ctx context.Context, update, sourceChat int64) error {
