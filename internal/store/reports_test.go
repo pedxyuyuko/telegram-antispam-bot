@@ -115,3 +115,29 @@ func TestResizeReportsCommittedQueueChanges(t *testing.T) {
 		t.Fatalf("resize report: %+v %v", report, err)
 	}
 }
+
+func TestFailedPersistenceDoesNotReturnACommittedReport(t *testing.T) {
+	s := openTest(t)
+	add(t, s, 1, -100, 1, 42, config.Defaults().Base)
+	j, err := s.Claim(context.Background(), testNow)
+	if err != nil || j == nil {
+		t.Fatalf("claim: %v %v", j, err)
+	}
+	if _, err := s.db.Exec(`CREATE TRIGGER reject_action BEFORE INSERT ON actions BEGIN SELECT RAISE(ABORT,'fixture rollback'); END`); err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.Finish(context.Background(), *j, decision.Result{Probabilities: map[string]float64{"violation": 1}}, nil, testNow, 10)
+	if err == nil || r.AttemptID != 0 || r.Evaluation != nil || len(r.Rules) != 0 || len(r.Actions) != 0 {
+		t.Fatalf("failed transaction exposed a success report: %+v %v", r, err)
+	}
+	var attempts, hits int
+	if err := s.db.QueryRow(`SELECT count(*) FROM attempts`).Scan(&attempts); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.QueryRow(`SELECT count(*) FROM hits`).Scan(&hits); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 0 || hits != 0 {
+		t.Fatal("failed decision was partially committed")
+	}
+}
