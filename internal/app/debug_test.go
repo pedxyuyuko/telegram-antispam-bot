@@ -154,7 +154,9 @@ func TestDebugTraceReportsEvictionRetryAndArchivedContextReuse(t *testing.T) {
 func TestDebugTraceExplainsActionDispatchAndProtection(t *testing.T) {
 	for _, member := range []string{"member", "administrator"} {
 		t.Run(member, func(t *testing.T) {
-			a, path := appFixture(t, member)
+			var role atomic.Value
+			role.Store("member")
+			a, path := appFixtureWithMembership(t, func() string { return role.Load().(string) })
 			log := captureDebug(a)
 			if err := a.Config.Set(nil, "debug", json.RawMessage(`true`)); err != nil {
 				t.Fatal(err)
@@ -162,6 +164,7 @@ func TestDebugTraceExplainsActionDispatchAndProtection(t *testing.T) {
 			groupedModel(t, a, path, "enforce")
 			deliver(t, a, 1, message(50, "action"))
 			runModel(t, a, time.Now())
+			role.Store(member)
 			if worked, err := a.ProcessAction(context.Background()); err != nil || !worked {
 				t.Fatalf("action: %v %v", worked, err)
 			}
@@ -278,7 +281,9 @@ func TestDisablingDebugDuringInferenceSuppressesSubsequentEvents(t *testing.T) {
 }
 
 func TestConfigurationDebugReportsQueueResizeAndRejectsWithoutValues(t *testing.T) {
-	a, _ := appFixture(t, "administrator")
+	var role atomic.Value
+	role.Store("member")
+	a, _ := appFixtureWithMembership(t, func() string { return role.Load().(string) })
 	log := captureDebug(a)
 	if err := a.Config.Set(nil, "debug", json.RawMessage(`true`)); err != nil {
 		t.Fatal(err)
@@ -288,6 +293,7 @@ func TestConfigurationDebugReportsQueueResizeAndRejectsWithoutValues(t *testing.
 		m.ID = i
 		deliver(t, a, int64(i), m)
 	}
+	role.Store("administrator")
 	m := message(42, `/as_set queue_limit 1`)
 	m.ID = 3
 	deliver(t, a, 3, m)

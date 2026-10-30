@@ -64,23 +64,19 @@ func sharedCommand(name, args string) bool {
 	return name == "as_reload" || (name == "as_config" && args == "base") || (name == "as_set" && len(strings.Fields(args)) > 0 && strings.Fields(args)[0] == "base")
 }
 
-func (a *App) authorized(ctx context.Context, m *telegram.Message, name, args string) bool {
+func (a *App) authorized(ctx context.Context, m *telegram.Message, name, args string, diagnostic *slog.Logger) (bool, string) {
 	user := m.UserID()
 	if user == 0 {
-		return false
+		return false, ""
 	}
 	if sharedCommand(name, args) {
-		return a.Config.Snapshot().IsOwner(user)
+		return a.Config.Snapshot().IsOwner(user), ""
 	}
 	if !m.IsGroup() {
-		return name == "as_help" || name == "start"
+		return name == "as_help" || name == "start", ""
 	}
-	status, err := a.Telegram.MemberStatus(ctx, m.Chat.ID, user)
-	if err != nil {
-		a.Log.Warn("administrator verification failed", "chat", m.Chat.ID, "error", err)
-		return false
-	}
-	return status == "creator" || status == "administrator"
+	status := a.membership(ctx, m, diagnostic)
+	return groupAdministrator(status), status
 }
 
 func (a *App) ProcessInbox(ctx context.Context) (bool, error) {
@@ -104,30 +100,33 @@ func (a *App) ProcessInbox(ctx context.Context) (bool, error) {
 	}
 	name, args := a.identify(m)
 	diagnostic := a.diagnostics(m.Chat.ID, "message", m.ID, "update", in.ID)
-	debug(diagnostic, "message.received", "sender", m.SenderKey(), "sender_is_bot", m.From != nil && m.From.IsBot, "edited", u.Edited != nil, "command", name, "text_bytes", len(m.Text), "caption_bytes", len(m.Caption), "has_reply", m.Reply != nil)
-	authorized := name != "" && a.authorized(ctx, m, name, args)
+	debug(diagnostic, "message.received", "sender", m.SenderKey(), "sender_is_bot", m.From != nil && m.From.IsBot, "automatic_forward", m.IsAutomaticForward, "edited", u.Edited != nil, "command", name, "text_bytes", len(m.Text), "caption_bytes", len(m.Caption), "has_reply", m.Reply != nil)
+	var authorized bool
+	var checkedRole string
+	if name != "" {
+		authorized, checkedRole = a.authorized(ctx, m, name, args, diagnostic)
+	}
 	if name != "" {
 		debug(diagnostic, "command.authorization", "command", name, "allowed", authorized)
 	}
-	cfg := a.Config.Snapshot()
-	status := "ignored"
-	if m.IsGroup() && m.UserID() != a.Telegram.Me.ID {
-		status = "pending"
-	}
+	status, skipReason := "pending", ""
 	if authorized {
 		status = "command"
+	} else if skipReason = a.exemption(ctx, m, checkedRole, diagnostic); skipReason != "" {
+		status = "ignored"
 	}
+	cfg := a.Config.Snapshot()
 	policy := cfg.ForGroup(m.Chat.ID)
 	questions, err := cfg.SelectedQuestions(policy)
 	if err != nil {
 		return false, err
 	}
-	archived, err := a.Store.AddRevision(ctx, *in, m, store.Snapshot{Policy: policy, Questions: questions}, status)
+	archived, err := a.Store.AddRevision(ctx, *in, m, store.Snapshot{Policy: policy, Questions: questions, SkipReason: skipReason}, status)
 	if err != nil {
 		return false, err
 	}
 	diagnostic = diagnostic.With("revision", archived.ID)
-	debug(diagnostic, "message.archived", "status", archived.Status, "duplicate", archived.Duplicate, "mode", policy.Mode, "question_count", len(questions), "queue_limit", policy.QueueLimit)
+	debug(diagnostic, "message.archived", "status", archived.Status, "skip_reason", skipReason, "duplicate", archived.Duplicate, "mode", policy.Mode, "question_count", len(questions), "queue_limit", policy.QueueLimit)
 	if archived.Evicted > 0 {
 		debug(diagnostic, "queue.evicted", "evicted", archived.Evicted, "queue_limit", policy.QueueLimit, "reason", "new_message")
 	}

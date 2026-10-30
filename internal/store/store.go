@@ -30,8 +30,9 @@ type Inbox struct {
 	ReceivedAt int64
 }
 type Snapshot struct {
-	Policy    config.Policy              `json:"policy"`
-	Questions map[string]config.Question `json:"questions"`
+	Policy     config.Policy              `json:"policy"`
+	Questions  map[string]config.Question `json:"questions"`
+	SkipReason string                     `json:"skip_reason,omitempty"`
 }
 type Job struct {
 	ID         int64

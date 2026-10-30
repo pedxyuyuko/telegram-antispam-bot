@@ -27,18 +27,19 @@ type Entity struct {
 	User   *User  `json:"user,omitempty"`
 }
 type Message struct {
-	ID              int             `json:"message_id"`
-	Chat            Chat            `json:"chat"`
-	From            *User           `json:"from,omitempty"`
-	SenderChat      *Chat           `json:"sender_chat,omitempty"`
-	Date            int64           `json:"date"`
-	EditDate        int64           `json:"edit_date,omitempty"`
-	Text            string          `json:"text,omitempty"`
-	Caption         string          `json:"caption,omitempty"`
-	Entities        []Entity        `json:"entities,omitempty"`
-	CaptionEntities []Entity        `json:"caption_entities,omitempty"`
-	Reply           *Message        `json:"reply_to_message,omitempty"`
-	Raw             json.RawMessage `json:"-"`
+	ID                 int             `json:"message_id"`
+	Chat               Chat            `json:"chat"`
+	From               *User           `json:"from,omitempty"`
+	SenderChat         *Chat           `json:"sender_chat,omitempty"`
+	Date               int64           `json:"date"`
+	EditDate           int64           `json:"edit_date,omitempty"`
+	IsAutomaticForward bool            `json:"is_automatic_forward,omitempty"`
+	Text               string          `json:"text,omitempty"`
+	Caption            string          `json:"caption,omitempty"`
+	Entities           []Entity        `json:"entities,omitempty"`
+	CaptionEntities    []Entity        `json:"caption_entities,omitempty"`
+	Reply              *Message        `json:"reply_to_message,omitempty"`
+	Raw                json.RawMessage `json:"-"`
 }
 
 func (m *Message) UnmarshalJSON(raw []byte) error {

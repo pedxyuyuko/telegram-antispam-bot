@@ -171,6 +171,8 @@ func TestPollingToDatabaseToModelEndToEnd(t *testing.T) {
 			fmt.Fprint(w, `{"ok":true,"result":{"url":""}}`)
 		case strings.HasSuffix(r.URL.Path, "getChat"):
 			fmt.Fprint(w, `{"ok":true,"result":{"id":42,"type":"private","bio":"public biography"}}`)
+		case strings.HasSuffix(r.URL.Path, "getChatMember"):
+			fmt.Fprint(w, `{"ok":true,"result":{"status":"member","user":{"id":42,"first_name":"Alice"}}}`)
 		case strings.HasSuffix(r.URL.Path, "getUpdates"):
 			if polls.Add(1) == 1 {
 				fmt.Fprint(w, `{"ok":true,"result":[{"update_id":500,"message":{"message_id":7,"date":1,"chat":{"id":-100,"type":"supergroup"},"from":{"id":42,"first_name":"Alice"},"text":"original","reply_markup":{"inline_keyboard":[[{"text":"button","url":"https://example.test/ad"}]]}}},{"update_id":501,"edited_message":{"message_id":7,"date":1,"edit_date":2,"chat":{"id":-100,"type":"supergroup"},"from":{"id":42,"first_name":"Alice"},"text":"edited","future_field":"preserve me"}}]}`)

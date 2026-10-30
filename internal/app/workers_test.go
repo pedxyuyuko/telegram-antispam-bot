@@ -108,13 +108,16 @@ func TestEnforcementDispatchesConfiguredDeleteAndMute(t *testing.T) {
 
 func TestModeChangeAndAdministratorProtectionCancelPendingActions(t *testing.T) {
 	for _, modeChange := range []bool{false, true} {
-		a, path := appFixture(t, "administrator")
+		var role atomic.Value
+		role.Store("member")
+		a, path := appFixtureWithMembership(t, func() string { return role.Load().(string) })
 		modelFixture(t, a, path, nil)
 		if err := a.Config.Set(nil, "mode", json.RawMessage(`"enforce"`)); err != nil {
 			t.Fatal(err)
 		}
 		deliver(t, a, 1, message(50, "sample"))
 		runModel(t, a, time.Now())
+		role.Store("administrator")
 		if modeChange {
 			if err := a.Config.Set(nil, "mode", json.RawMessage(`"record"`)); err != nil {
 				t.Fatal(err)
@@ -345,9 +348,18 @@ func TestAnonymousAdministratorProtectionPreservesExternalChannelModeration(t *t
 			m.From.IsBot = true
 			m.SenderChat = &telegram.Chat{ID: sender, Type: "supergroup"}
 			deliver(t, a, 1, m)
-			runModel(t, a, time.Now())
-			if worked, err := a.ProcessAction(context.Background()); err != nil || !worked {
-				t.Fatalf("dispatch: %v %v", worked, err)
+			if sender == -100 {
+				if worked, err := a.ProcessModel(context.Background(), time.Now()); err != nil || worked {
+					t.Fatalf("anonymous administrator inferred: %v %v", worked, err)
+				}
+				if scalar(t, path, `SELECT count(*) FROM revisions WHERE status='ignored'`) != 1 {
+					t.Fatal("anonymous message not archived as ignored")
+				}
+			} else {
+				runModel(t, a, time.Now())
+				if worked, err := a.ProcessAction(context.Background()); err != nil || !worked {
+					t.Fatalf("dispatch: %v %v", worked, err)
+				}
 			}
 			want := int32(1)
 			if sender == -100 {

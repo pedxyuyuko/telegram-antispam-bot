@@ -23,6 +23,11 @@ import (
 
 func appFixture(t *testing.T, member string, observe ...func(*http.Request)) (*App, string) {
 	t.Helper()
+	return appFixtureWithMembership(t, func() string { return member }, observe...)
+}
+
+func appFixtureWithMembership(t *testing.T, membership func() string, observe ...func(*http.Request)) (*App, string) {
+	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	dbpath := filepath.Join(dir, "bot.sqlite")
@@ -45,7 +50,7 @@ func appFixture(t *testing.T, member string, observe ...func(*http.Request)) (*A
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case strings.HasSuffix(r.URL.Path, "getChatMember"):
-			w.Write([]byte(`{"ok":true,"result":{"status":"` + member + `","user":{"id":42,"first_name":"u"}}}`))
+			w.Write([]byte(`{"ok":true,"result":{"status":"` + membership() + `","user":{"id":42,"first_name":"u"}}}`))
 		case strings.HasSuffix(r.URL.Path, "sendMessage"):
 			w.Write([]byte(`{"ok":true,"result":{"message_id":100,"chat":{"id":-100,"type":"supergroup"},"date":1}}`))
 		case strings.HasSuffix(r.URL.Path, "getChat"):

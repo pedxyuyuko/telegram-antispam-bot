@@ -139,7 +139,11 @@ func testPersistentRuntime(t *testing.T, useCompose bool) {
 		case strings.HasSuffix(r.URL.Path, "getWebhookInfo"):
 			fmt.Fprint(w, `{"ok":true,"result":{"url":""}}`)
 		case strings.HasSuffix(r.URL.Path, "getChatMember"):
-			fmt.Fprint(w, `{"ok":true,"result":{"status":"administrator","user":{"id":42,"first_name":"Admin"}}}`)
+			if r.FormValue("user_id") == "42" {
+				fmt.Fprint(w, `{"ok":true,"result":{"status":"administrator","user":{"id":42,"first_name":"Admin"}}}`)
+			} else {
+				fmt.Fprint(w, `{"ok":true,"result":{"status":"member","user":{"id":50,"first_name":"User"}}}`)
+			}
 		case strings.HasSuffix(r.URL.Path, "getChat"):
 			fmt.Fprint(w, `{"ok":true,"result":{"id":50,"type":"private","bio":"public profile"}}`)
 		case strings.HasSuffix(r.URL.Path, "sendMessage"):
