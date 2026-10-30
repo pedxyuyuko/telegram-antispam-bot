@@ -67,14 +67,13 @@ type Client struct {
 	Bot      *bot.Bot
 	Me       *models.User
 	token    string
-	log      *slog.Logger
 	ttl      time.Duration
 	mu       sync.Mutex
 	profiles map[int64]cachedProfile
 }
 
 func New(cfg config.Telegram, token string, httpClient bot.HttpClient, lastID int64, log *slog.Logger) (*Client, error) {
-	c := &Client{token: token, log: log, ttl: time.Duration(cfg.ProfileCacheSeconds) * time.Second, profiles: map[int64]cachedProfile{}}
+	c := &Client{token: token, ttl: time.Duration(cfg.ProfileCacheSeconds) * time.Second, profiles: map[int64]cachedProfile{}}
 	b, err := bot.New(token, bot.WithSkipGetMe(), bot.WithServerURL(cfg.APIBase),
 		bot.WithHTTPClient(time.Duration(cfg.PollTimeoutSeconds)*time.Second, httpClient),
 		bot.WithAllowedUpdates(bot.AllowedUpdates{"message", "edited_message"}), bot.WithInitialOffset(lastID),
@@ -111,31 +110,35 @@ func (c *Client) Initialize(ctx context.Context) error {
 }
 func (c *Client) Start(ctx context.Context) { c.Bot.Start(ctx) }
 
-func (c *Client) Profile(ctx context.Context, m *Message) Profile {
+func (c *Client) Profile(ctx context.Context, m *Message, diagnostic *slog.Logger) Profile {
 	id := m.UserID()
 	if m.SenderChat != nil {
 		id = m.SenderChat.ID
 	}
 	if id == 0 {
+		diagnostic.Debug("profile.unavailable", "event", "profile.unavailable", "reason", "missing_sender")
 		return Profile{Status: "unavailable"}
 	}
 	c.mu.Lock()
 	cached, ok := c.profiles[id]
 	c.mu.Unlock()
 	if ok && time.Now().Before(cached.expires) {
+		diagnostic.Debug("profile.cache_hit", "event", "profile.cache_hit", "sender", id, "status", cached.value.Status, "fetched_at", cached.value.FetchedAt)
 		return cached.value
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	started := time.Now()
+	diagnostic.Debug("profile.started", "event", "profile.started", "sender", id)
 	chat, err := c.Bot.GetChat(ctx, &bot.GetChatParams{ChatID: id})
 	p := Profile{Status: "available", FetchedAt: time.Now().Unix()}
 	if err != nil {
 		p.Status = "unavailable"
-		c.log.Debug("sender profile unavailable", "sender", id, "error", c.safe(err))
 	} else {
 		p.Bio = chat.Bio
 		p.Description = chat.Description
 	}
+	diagnostic.Debug("profile.completed", "event", "profile.completed", "sender", id, "status", p.Status, "duration_ms", time.Since(started).Milliseconds(), "has_bio", p.Bio != "", "has_description", p.Description != "", "error", c.safe(err))
 	c.mu.Lock()
 	// Bound the ancillary cache; the archive and queue live in SQLite.
 	if len(c.profiles) >= 10000 {

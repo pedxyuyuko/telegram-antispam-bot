@@ -90,7 +90,7 @@ func run(ctx context.Context, args []string, out, logs io.Writer) (err error) {
 	if err != nil {
 		return err
 	}
-	log := slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	log := slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	noRedirect := func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	telegramHTTP := &http.Client{Timeout: time.Duration(c.Telegram.PollTimeoutSeconds+10) * time.Second, CheckRedirect: noRedirect}
 	durable := &telegram.DurableClient{HTTP: telegramHTTP, Capture: s.Capture}

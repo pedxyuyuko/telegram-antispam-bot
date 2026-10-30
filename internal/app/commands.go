@@ -110,12 +110,20 @@ func (a *App) ProcessInbox(ctx context.Context) (bool, error) {
 		status = "command"
 	}
 	policy := cfg.ForGroup(m.Chat.ID)
+	diagnostic := a.diagnostics(m.Chat.ID, "message", m.ID, "update", in.ID)
+	debug(diagnostic, "message.received", "sender", m.SenderKey(), "edited", u.Edited != nil, "status", status, "command", name, "authorized", authorized, "text_bytes", len(m.Text), "caption_bytes", len(m.Caption), "has_reply", m.Reply != nil)
 	questions, err := cfg.SelectedQuestions(policy)
 	if err != nil {
 		return false, err
 	}
-	if _, err := a.Store.AddRevision(ctx, *in, m, store.Snapshot{Policy: policy, Questions: questions}, status); err != nil {
+	archived, err := a.Store.AddRevision(ctx, *in, m, store.Snapshot{Policy: policy, Questions: questions}, status)
+	if err != nil {
 		return false, err
+	}
+	diagnostic = diagnostic.With("revision", archived.ID)
+	debug(diagnostic, "message.archived", "status", archived.Status, "duplicate", archived.Duplicate, "mode", policy.Mode, "question_count", len(questions), "queue_limit", policy.QueueLimit)
+	if archived.Evicted > 0 {
+		debug(diagnostic, "queue.evicted", "evicted", archived.Evicted, "queue_limit", policy.QueueLimit, "reason", "new_message")
 	}
 	if authorized {
 		reply, err := a.command(ctx, in.ID, m, name, args)

@@ -203,7 +203,7 @@ func TestPollingToDatabaseToModelEndToEnd(t *testing.T) {
 		for id := range request.Questions {
 			answers[id] = map[string]any{"type": "noul", "noul": 0.1}
 		}
-		json.NewEncoder(w).Encode(map[string]any{"model": request.Model, "answers": answers})
+		json.NewEncoder(w).Encode(map[string]any{"model": request.Model, "answers": answers, "private": "MODEL_BODY_SENTINEL"})
 	}))
 	defer model.Close()
 	dir := t.TempDir()
@@ -212,6 +212,7 @@ func TestPollingToDatabaseToModelEndToEnd(t *testing.T) {
 	c.OwnerIDs = []int64{9}
 	c.Model.Name = "m"
 	c.Model.BaseURL = model.URL
+	c.Base.Debug = true
 	c.Telegram.APIBase = tg.URL
 	c.Telegram.TokenEnv = "TEST_BOT_TOKEN"
 	raw, _ := json.Marshal(c)
@@ -269,5 +270,29 @@ func TestPollingToDatabaseToModelEndToEnd(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "123:local-test") {
 		t.Fatal("token leaked into logs")
+	}
+	for _, private := range []string{"public biography", "preserve me", "MODEL_BODY_SENTINEL"} {
+		if strings.Contains(logs.String(), private) {
+			t.Fatalf("payload leaked into logs: %s", private)
+		}
+	}
+	var started, archived int
+	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		var row map[string]any
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatal(err)
+		}
+		if row["level"] == "DEBUG" && row["event"] == "model.started" {
+			started++
+		}
+		if row["level"] == "DEBUG" && row["event"] == "model.archived" {
+			archived++
+		}
+	}
+	if started != 2 || archived != 2 {
+		t.Fatalf("CLI filtered debug logs: starts=%d archives=%d", started, archived)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM attempts WHERE json_extract(response,'$.private')='MODEL_BODY_SENTINEL'`).Scan(&n); err != nil || n != 2 {
+		t.Fatal("raw model evidence lost while suppressing payload logs")
 	}
 }
