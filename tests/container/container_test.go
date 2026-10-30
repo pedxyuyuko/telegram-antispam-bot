@@ -89,6 +89,9 @@ func TestImageHasNonRootDefaultsAndHTTPSRoots(t *testing.T) {
 	if c.Base.Mode != "record" {
 		t.Fatal("image example enables automatic punishment")
 	}
+	if c.Base.Scoring == nil || c.Base.Condition == "" || len(c.QuestionGroups) != 6 {
+		t.Fatal("image example lost the grouped scoring configuration")
+	}
 	id := strings.TrimSpace(string(command(t, engine, "create", name, "-example")))
 	cleanupContainer(t, engine, id)
 	cert := filepath.Join(t.TempDir(), "ca-certificates.crt")

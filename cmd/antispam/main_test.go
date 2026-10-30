@@ -49,6 +49,42 @@ func TestExampleAndOfflineValidation(t *testing.T) {
 	}
 }
 
+func TestExampleProvidesGroupedScoringOutsideRepository(t *testing.T) {
+	t.Chdir(t.TempDir())
+	var out, logs bytes.Buffer
+	if err := run(context.Background(), []string{"-example"}, &out, &logs); err != nil {
+		t.Fatal(err)
+	}
+	c, err := config.Decode(out.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Questions) != 0 || c.Base.Scoring == nil || c.Base.Condition == "" {
+		t.Fatal("example still uses the legacy flat-question policy")
+	}
+	for _, group := range []string{"profile", "message", "entry", "crosslink", "benign", "decision"} {
+		p := c.Base
+		p.Questions = []string{group + ".*"}
+		questions, err := c.SelectedQuestions(p)
+		if err != nil || len(questions) != 4 {
+			t.Fatalf("incomplete question group %s: %v %v", group, questions, err)
+		}
+		for id, q := range questions {
+			if len(q.Criteria) == 0 {
+				t.Fatalf("question %s lost its answer criteria", id)
+			}
+		}
+	}
+	questions, err := c.SelectedQuestions(c.Base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := decision.EvaluatePolicy(questions, c.Base, decision.Result{Probabilities: map[string]float64{"profile.promotion": .99, "message.promotion": .99}})
+	if err != nil || e.Score != 70 || e.Condition != expression.True {
+		t.Fatalf("generated example lost custom scoring: %+v %v", e, err)
+	}
+}
+
 func TestGroupedExampleValidatesAndScoresRepresentativeMessages(t *testing.T) {
 	path := filepath.Join("..", "..", "examples", "scoring.json")
 	var out, logs bytes.Buffer

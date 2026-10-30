@@ -132,7 +132,7 @@ export SYSTEMONE_API_KEY='替换成决策服务密钥'  # 本地服务关闭鉴�
 推荐使用超级群；限时禁言依赖 Telegram 的超级群限制成员接口。
 程序使用 long polling；已有 webhook 时启动会提示先移除 webhook。
 
-`-check` 仅校验配置；`-example` 向标准输出打印完整示例。
+`-check` 仅校验配置；`-example` 向标准输出打印包含 6 组 24 道候选题和计分规则的完整示例，与 `examples/scoring.json` 共用题库。示例嵌入二进制，任意工作目录和容器内均可生成。
 数据库路径相对于配置文件所在目录解析，默认是 `data/bot.sqlite`。
 同一数据库由一个机器人进程独占；重启时会恢复已收到的更新和剩余待判任务。
 
@@ -206,7 +206,7 @@ chmod 600 config.json
 
 - `question_groups.<组名>.<题名>` 定义题目，包含 `type`、`instructions` 和可选的正反标准或选项 `criteria`。
 - `base.questions` / `groups.<群ID>.questions` 选择单题，例如 `"message.promotion"`，或整组，例如 `"profile.*"`。数组整体替换；重复选择、空数组和未知题目在重载时拒绝。每群最多选 256 题。
-- 省略选题时继续使用原来的顶层 `questions`。旧配置、`-example` 生成的五题配置和单题概率规则保持兼容。
+- 省略选题时继续使用原来的顶层 `questions`。旧版生成的五题配置和单题概率规则保持兼容；当前 `-example` 输出分组题库及计分配置。
 - `scoring.initial` 是初始分；`scoring.rules` 是整组替换的加减分项数组，每项包含唯一的 `name`、布尔表达式 `when`、有符号数值 `add`。匹配项全部累计，负数扣分，最终总分允许为负数。
 - `condition` 是最终门槛。仅成立时进入已有的累计次数与动作处理；省略该字段保留原有规则行为。
 

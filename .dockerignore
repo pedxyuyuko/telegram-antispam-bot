@@ -6,3 +6,6 @@
 !cmd/**
 !internal/
 !internal/**
+!examples/
+!examples/embed.go
+!examples/scoring.json

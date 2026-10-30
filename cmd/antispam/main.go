@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"telegram-antispam-bot/examples"
 	"telegram-antispam-bot/internal/app"
 	"telegram-antispam-bot/internal/config"
 	"telegram-antispam-bot/internal/decision"
@@ -48,10 +49,10 @@ func run(ctx context.Context, args []string, out, logs io.Writer) (err error) {
 		return errors.New("unexpected positional arguments")
 	}
 	if *example {
-		c := config.Defaults()
-		c.OwnerIDs = []int64{123456789}
-		c.Model.Name = "replace-with-served-model-name"
-		c.Groups["-1001234567890"] = json.RawMessage(`{"queue_limit":50,"rules":{"repeat":{"duration_seconds":120}}}`)
+		c, err := config.Decode([]byte(examples.Scoring()))
+		if err != nil {
+			return fmt.Errorf("embedded example: %w", err)
+		}
 		e := json.NewEncoder(out)
 		e.SetIndent("", "  ")
 		return e.Encode(c)
