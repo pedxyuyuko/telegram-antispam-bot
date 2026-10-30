@@ -83,7 +83,8 @@ func run(ctx context.Context, args []string, out, logs io.Writer) (err error) {
 		return fmt.Errorf("database: %w", err)
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	if _, err := s.Resize(ctx, c); err != nil {
+	resized, err := s.Resize(ctx, c)
+	if err != nil {
 		return err
 	}
 	lastID, err := s.LastUpdateID(ctx)
@@ -91,6 +92,11 @@ func run(ctx context.Context, args []string, out, logs io.Writer) (err error) {
 		return err
 	}
 	log := slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	for _, change := range resized {
+		if c.ForGroup(change.ChatID).Debug {
+			log.Debug("queue.resized", "event", "queue.resized", "chat", change.ChatID, "queue_limit", change.Limit, "evicted", change.Evicted, "reason", "startup")
+		}
+	}
 	noRedirect := func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	telegramHTTP := &http.Client{Timeout: time.Duration(c.Telegram.PollTimeoutSeconds+10) * time.Second, CheckRedirect: noRedirect}
 	durable := &telegram.DurableClient{HTTP: telegramHTTP, Capture: s.Capture}

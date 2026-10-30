@@ -276,3 +276,56 @@ func TestDisablingDebugDuringInferenceSuppressesSubsequentEvents(t *testing.T) {
 		t.Fatal("debug change affected persistence")
 	}
 }
+
+func TestConfigurationDebugReportsQueueResizeAndRejectsWithoutValues(t *testing.T) {
+	a, _ := appFixture(t, "administrator")
+	log := captureDebug(a)
+	if err := a.Config.Set(nil, "debug", json.RawMessage(`true`)); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 2; i++ {
+		m := message(50, "sample")
+		m.ID = i
+		deliver(t, a, int64(i), m)
+	}
+	m := message(42, `/as_set queue_limit 1`)
+	m.ID = 3
+	deliver(t, a, 3, m)
+	updated := events(t, log, "config.updated")
+	if len(updated) != 1 || updated[0]["scope"] != "group" || updated[0]["setting"] != "queue_limit" || updated[0]["actor"] != float64(42) {
+		t.Fatalf("config audit lost: %v", updated)
+	}
+	resized := events(t, log, "queue.resized")
+	if len(resized) != 1 || resized[0]["evicted"] != float64(1) || resized[0]["queue_limit"] != float64(1) {
+		t.Fatalf("resize outcome lost: %v", resized)
+	}
+	m = message(42, `/as_set condition "PRIVATE_CONFIG_SECRET"`)
+	m.ID = 4
+	deliver(t, a, 4, m)
+	if len(events(t, log, "config.rejected")) != 1 {
+		t.Fatal("rejected setting not logged")
+	}
+	if strings.Contains(log.String(), "PRIVATE_CONFIG_SECRET") {
+		t.Fatal("command arguments leaked to logs")
+	}
+}
+
+func TestConfigurationAuditSurvivesDisablingDebug(t *testing.T) {
+	a, _ := appFixture(t, "administrator")
+	log := captureDebug(a)
+	if err := a.Config.Set(nil, "debug", json.RawMessage(`true`)); err != nil {
+		t.Fatal(err)
+	}
+	deliver(t, a, 1, message(42, `/as_set debug false`))
+	updated := events(t, log, "config.updated")
+	if len(updated) != 1 || updated[0]["level"] != "INFO" {
+		t.Fatal("debug disable hid its own committed configuration change")
+	}
+	log.Reset()
+	m := message(50, "quiet message")
+	m.ID = 2
+	deliver(t, a, 2, m)
+	if strings.Contains(log.String(), `"level":"DEBUG"`) {
+		t.Fatal("debug remained enabled")
+	}
+}

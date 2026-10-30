@@ -90,17 +90,25 @@ func (a *App) ProcessInbox(ctx context.Context) (bool, error) {
 	}
 	u, err := telegram.Parse(in.Raw)
 	if err != nil {
+		debug(a.diagnostics(0, "update", in.ID), "update.ignored", "reason", "invalid_update")
 		return true, a.Store.MarkInbox(ctx, in.ID, "invalid update: "+err.Error())
 	}
 	m := u.Current()
 	if m == nil {
+		debug(a.diagnostics(0, "update", in.ID), "update.ignored", "reason", "unsupported_update")
 		return true, a.Store.MarkInbox(ctx, in.ID, "unsupported update type")
 	}
 	if m.ID <= 0 || m.Chat.ID == 0 {
+		debug(a.diagnostics(m.Chat.ID, "update", in.ID), "update.ignored", "reason", "invalid_message_identity")
 		return true, a.Store.MarkInbox(ctx, in.ID, "invalid message identity")
 	}
 	name, args := a.identify(m)
+	diagnostic := a.diagnostics(m.Chat.ID, "message", m.ID, "update", in.ID)
+	debug(diagnostic, "message.received", "sender", m.SenderKey(), "edited", u.Edited != nil, "command", name, "text_bytes", len(m.Text), "caption_bytes", len(m.Caption), "has_reply", m.Reply != nil)
 	authorized := name != "" && a.authorized(ctx, m, name, args)
+	if name != "" {
+		debug(diagnostic, "command.authorization", "command", name, "allowed", authorized)
+	}
 	cfg := a.Config.Snapshot()
 	status := "ignored"
 	if m.IsGroup() && (m.SenderChat != nil || m.From == nil || !m.From.IsBot) && m.UserID() != a.Telegram.Me.ID {
@@ -110,8 +118,6 @@ func (a *App) ProcessInbox(ctx context.Context) (bool, error) {
 		status = "command"
 	}
 	policy := cfg.ForGroup(m.Chat.ID)
-	diagnostic := a.diagnostics(m.Chat.ID, "message", m.ID, "update", in.ID)
-	debug(diagnostic, "message.received", "sender", m.SenderKey(), "edited", u.Edited != nil, "status", status, "command", name, "authorized", authorized, "text_bytes", len(m.Text), "caption_bytes", len(m.Caption), "has_reply", m.Reply != nil)
 	questions, err := cfg.SelectedQuestions(policy)
 	if err != nil {
 		return false, err
@@ -162,6 +168,7 @@ const help = `群管理员命令：
 /as_set rules.repeat.enabled false`
 
 func (a *App) command(ctx context.Context, updateID int64, m *telegram.Message, name, args string) (string, error) {
+	diagnostic := a.diagnostics(m.Chat.ID, "message", m.ID, "update", updateID, "command", name, "actor", m.UserID())
 	switch name {
 	case "start", "as_help":
 		return help, nil
@@ -198,17 +205,25 @@ func (a *App) command(ctx context.Context, updateID int64, m *telegram.Message, 
 		}
 		fields := strings.Fields(args)
 		if len(fields) < 2 {
+			debug(diagnostic, "config.rejected", "reason", "missing_arguments")
 			return "用法：/as_set [base] <参数路径> <JSON值>", nil
 		}
 		path := fields[0]
 		value := strings.TrimSpace(args[len(path):])
 		if !json.Valid([]byte(value)) {
+			debug(diagnostic, "config.rejected", "reason", "invalid_json")
 			return "值需要使用 JSON 格式，例如 true、100 或 \"record\"。", nil
 		}
 		if err := a.Config.Set(chat, path, json.RawMessage(value)); err != nil {
+			debug(diagnostic, "config.rejected", "reason", "validation_or_write_failed")
 			return "配置修改失败：" + err.Error(), nil
 		}
-		if _, err := a.Store.Resize(ctx, a.Config.Snapshot()); err != nil {
+		scope := "group"
+		if chat == nil {
+			scope = "base"
+		}
+		diagnostic.Info("configuration updated", "event", "config.updated", "scope", scope, "setting", path)
+		if err := a.resizeQueues(ctx, updateID, m.Chat.ID); err != nil {
 			return "", err
 		}
 		return "配置已生效并写回文件。", nil
@@ -217,17 +232,21 @@ func (a *App) command(ctx context.Context, updateID int64, m *telegram.Message, 
 			return "请在目标群里恢复配置继承。", nil
 		}
 		if err := a.Config.Reset(m.Chat.ID, strings.TrimSpace(args)); err != nil {
+			debug(diagnostic, "config.rejected", "reason", "reset_failed")
 			return "恢复失败：" + err.Error(), nil
 		}
-		if _, err := a.Store.Resize(ctx, a.Config.Snapshot()); err != nil {
+		diagnostic.Info("configuration inheritance restored", "event", "config.reset", "scope", "group", "setting", strings.TrimSpace(args))
+		if err := a.resizeQueues(ctx, updateID, m.Chat.ID); err != nil {
 			return "", err
 		}
 		return "该参数已恢复继承共享配置。", nil
 	case "as_reload":
 		if err := a.Config.Reload(); err != nil {
+			debug(diagnostic, "config.rejected", "reason", "reload_failed")
 			return "重载失败，继续使用当前配置：" + err.Error(), nil
 		}
-		if _, err := a.Store.Resize(ctx, a.Config.Snapshot()); err != nil {
+		diagnostic.Info("configuration reloaded", "event", "config.reloaded", "scope", "base", "group_overrides", len(a.Config.Snapshot().Groups))
+		if err := a.resizeQueues(ctx, updateID, m.Chat.ID); err != nil {
 			return "", err
 		}
 		return "文件配置已校验并生效。", nil
@@ -269,6 +288,7 @@ func (a *App) command(ctx context.Context, updateID int64, m *telegram.Message, 
 		if err := a.Store.Label(ctx, updateID, m.Chat.ID, target.ID, m.UserID(), label, target.Bytes()); err != nil {
 			return "", err
 		}
+		diagnostic.Info("manual annotation recorded", "event", "annotation.recorded", "target_message", target.ID, "label", label)
 		return fmt.Sprintf("消息 %d 已标注为 %s；模型判断和原始内容已保留。", target.ID, label), nil
 	}
 	return help, nil

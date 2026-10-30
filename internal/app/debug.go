@@ -42,3 +42,14 @@ func questionIDs(questions map[string]config.Question) []string {
 	sort.Strings(ids)
 	return ids
 }
+
+func (a *App) resizeQueues(ctx context.Context, update, sourceChat int64) error {
+	changes, err := a.Store.Resize(ctx, a.Config.Snapshot())
+	if err != nil {
+		return err
+	}
+	for _, change := range changes {
+		debug(a.diagnostics(change.ChatID, "update", update, "source_chat", sourceChat), "queue.resized", "queue_limit", change.Limit, "evicted", change.Evicted, "reason", "configuration_changed")
+	}
+	return nil
+}
