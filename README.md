@@ -170,7 +170,7 @@ export SYSTEMONE_API_KEY='替换成决策服务密钥'  # 本地服务关闭鉴�
 
 这是完整配置中的策略部分。示例群最终使用“600 秒内至少 3 条消息命中，禁言 120 秒”，其余参数继承共享值。
 `false` 和 `0` 按明确设置处理；删除覆盖项即可恢复继承。配置拒绝未知字段、重复键和 `null`。
-文件中的 `base.rules` 和顶层 `questions` 一旦显式提供，就定义完整集合；省略时使用内建默认值。
+文件中的 `base.rules` 一旦显式提供，就定义完整规则集合；省略时使用内建默认规则。题库使用 `question_groups` 或显式的顶层 `questions`；两者均省略时使用内建五题。
 例如 `/as_set base rules {}` 清空共享规则；群级 `rules` 继续逐规则、逐字段覆盖。
 
 | 参数 | 含义 |
@@ -206,7 +206,7 @@ chmod 600 config.json
 
 - `question_groups.<组名>.<题名>` 定义题目，包含 `type`、`instructions` 和可选的正反标准或选项 `criteria`。
 - `base.questions` / `groups.<群ID>.questions` 选择单题，例如 `"message.promotion"`，或整组，例如 `"profile.*"`。数组整体替换；重复选择、空数组和未知题目在重载时拒绝。每群最多选 256 题。
-- 省略选题时继续使用原来的顶层 `questions`。旧版生成的五题配置和单题概率规则保持兼容；当前 `-example` 输出分组题库及计分配置。
+- 分组配置使用 `question_groups` 定义题库，通过 `base.questions` 和群级 `questions` 选题。顶层空 `questions` 字段可以省略。显式提供的旧版平铺题库继续兼容；两种题库均省略时使用内建五题。当前 `-example` 输出分组题库及计分配置。
 - `scoring.initial` 是初始分；`scoring.rules` 是整组替换的加减分项数组，每项包含唯一的 `name`、布尔表达式 `when`、有符号数值 `add`。匹配项全部累计，负数扣分，最终总分允许为负数。
 - `condition` 是最终门槛。仅成立时进入已有的累计次数与动作处理；省略该字段保留原有规则行为。
 

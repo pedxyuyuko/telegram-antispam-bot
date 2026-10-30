@@ -66,7 +66,7 @@ type Config struct {
 	Database       string                         `json:"database"`
 	Telegram       Telegram                       `json:"telegram"`
 	Model          Model                          `json:"model"`
-	Questions      map[string]Question            `json:"questions"`
+	Questions      map[string]Question            `json:"questions,omitempty"`
 	QuestionGroups map[string]map[string]Question `json:"question_groups,omitempty"`
 	Base           Policy                         `json:"base"`
 	Groups         map[string]json.RawMessage     `json:"groups"`
@@ -267,13 +267,16 @@ func strict(raw []byte, out any) error {
 
 func Decode(raw []byte) (Config, error) {
 	c := Defaults()
-	// Omitted dictionaries use defaults; explicitly supplied dictionaries are
-	// complete sets. Group policies are merged separately, field by field.
+	// Explicit question dictionaries replace the legacy defaults. Grouped
+	// configurations need no empty legacy dictionary; explicit flat questions
+	// can still coexist with groups. Policies merge separately, field by field.
 	var root map[string]json.RawMessage
 	if err := strict(raw, &root); err != nil {
 		return Config{}, err
 	}
-	if _, present := root["questions"]; present {
+	_, flatQuestions := root["questions"]
+	_, groupedQuestions := root["question_groups"]
+	if flatQuestions || groupedQuestions {
 		c.Questions = nil
 	}
 	if _, present := root["groups"]; present {

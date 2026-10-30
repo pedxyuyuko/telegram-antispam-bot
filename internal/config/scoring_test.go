@@ -44,6 +44,74 @@ func TestGroupedQuestionsScoringAndLocalOverrides(t *testing.T) {
 	}
 }
 
+func TestGroupedConfigOmitsLegacyQuestionSetAcrossCommandWrites(t *testing.T) {
+	raw := strings.Replace(groupedConfig, `"questions":{},`, "", 1)
+	c, err := Decode([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Questions) != 0 {
+		t.Fatal("grouped config inherited the legacy question bank")
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := int64(-100)
+	if err := m.Set(&chat, "debug", json.RawMessage(`true`)); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(saved, &root); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := root["questions"]; exists {
+		t.Fatal("command write reintroduced the obsolete empty question set")
+	}
+	m, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c = m.Snapshot()
+	questions, err := c.SelectedQuestions(c.ForGroup(chat))
+	if err != nil || len(questions) != 4 || len(c.Questions) != 0 || !c.ForGroup(chat).Debug {
+		t.Fatalf("grouped config changed on restart: %v %v", questions, err)
+	}
+}
+
+func TestExplicitFlatQuestionsRemainCompatibleWithGroupedQuestions(t *testing.T) {
+	raw := strings.Replace(groupedConfig, `"questions":{}`, `"questions":{"legacy":{"type":"noul","instructions":"legacy?"}}`, 1)
+	raw = strings.Replace(raw, `["profile.*","message.*"]`, `["profile.*","message.*","legacy"]`, 1)
+	c, err := Decode([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err = Decode(saved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	questions, err := c.SelectedQuestions(c.Base)
+	if err != nil || len(questions) != 5 || c.Questions["legacy"].Instructions != "legacy?" {
+		t.Fatalf("explicit legacy question lost: %v %v", questions, err)
+	}
+	legacy, err := Decode([]byte(`{"owner_ids":[9],"model":{"name":"m"}}`))
+	if err != nil || len(legacy.Questions) != 5 {
+		t.Fatalf("legacy defaults changed: %v", err)
+	}
+}
+
 func TestRejectsUnknownReferencesAndInvalidQuestionCriteria(t *testing.T) {
 	for _, change := range [][2]string{
 		{`"profile.*"`, `"missing.*"`},

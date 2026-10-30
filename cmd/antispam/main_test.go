@@ -55,6 +55,13 @@ func TestExampleProvidesGroupedScoringOutsideRepository(t *testing.T) {
 	if err := run(context.Background(), []string{"-example"}, &out, &logs); err != nil {
 		t.Fatal(err)
 	}
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(out.Bytes(), &root); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := root["questions"]; exists {
+		t.Fatal("generated example includes the obsolete top-level question set")
+	}
 	c, err := config.Decode(out.Bytes())
 	if err != nil {
 		t.Fatal(err)
