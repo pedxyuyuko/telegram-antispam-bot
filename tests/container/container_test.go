@@ -89,8 +89,15 @@ func TestImageHasNonRootDefaultsAndHTTPSRoots(t *testing.T) {
 	if c.Base.Mode != "record" {
 		t.Fatal("image example enables automatic punishment")
 	}
-	if c.Base.Scoring == nil || c.Base.Condition == "" || len(c.QuestionGroups) != 6 {
+	if c.Base.Scoring == nil || c.Base.Condition == "" || len(c.QuestionGroups) != 2 {
 		t.Fatal("image example lost the grouped scoring configuration")
+	}
+	questions, err := c.SelectedQuestions(c.Base)
+	if err != nil || len(questions) != 8 {
+		t.Fatalf("image example lost the eight-question selection: %v", err)
+	}
+	if !strings.Contains(questions["content.money"].Instructions, ".msg") || !strings.Contains(questions["profile.money"].Instructions, ".sender") {
+		t.Fatal("image example lost the separate message and sender regions")
 	}
 	id := strings.TrimSpace(string(command(t, engine, "create", name, "-example")))
 	cleanupContainer(t, engine, id)
