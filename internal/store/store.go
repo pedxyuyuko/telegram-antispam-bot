@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS annotations(
  report_update_id INTEGER PRIMARY KEY,chat_id INTEGER NOT NULL,message_id INTEGER NOT NULL,
  actor_id INTEGER NOT NULL,label TEXT NOT NULL CHECK(label IN ('spam','ham')),
  target_raw TEXT NOT NULL,created_at INTEGER NOT NULL);
-PRAGMA user_version=2;`
+`
 
 func Open(path string) (*Store, error) {
 	abs, err := filepath.Abs(path)
@@ -132,17 +132,27 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if version > 2 {
+	if version > 3 {
 		db.Close()
 		return nil, fmt.Errorf("unsupported database schema version %d", version)
 	}
-	// The additive v2 migration preserves v1 attempts and all pending work.
+	// Additive migrations preserve original attempts, message bodies and actions.
 	tx, err := db.Begin()
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
 	if _, err := tx.Exec(schema); err != nil {
+		tx.Rollback()
+		db.Close()
+		return nil, err
+	}
+	if _, err := tx.Exec(blacklistSchema); err != nil {
+		tx.Rollback()
+		db.Close()
+		return nil, err
+	}
+	if err := bootstrapBotBlacklist(context.Background(), tx); err != nil {
 		tx.Rollback()
 		db.Close()
 		return nil, err
