@@ -111,6 +111,8 @@ type Profile struct {
 	FetchedAt   int64  `json:"fetched_at,omitempty"`
 }
 
+// State preserves the legacy raw-JSON context for offline archive consumers.
+// Live inference uses ModelState; frozen historical contexts remain unchanged.
 func (m *Message) State(profile Profile) json.RawMessage {
 	type expanded struct {
 		Type string `json:"type"`

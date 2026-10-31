@@ -42,7 +42,7 @@ func groupedModel(t *testing.T, a *App, path, mode string) {
 		if len(req.Questions) != 2 || req.Questions["message.fraud"].Instructions != "fraud?" {
 			t.Error("request lost selected/frozen question definitions")
 		}
-		if !strings.Contains(string(req.State["sender_profile"]), "profile") {
+		if !strings.Contains(string(req.State["sender"]), "profile") {
 			t.Error("profile material lost")
 		}
 		w.Write([]byte(`{"model":"m","answers":{"message.fraud":{"type":"noul","noul":0.99},"context.kind":{"type":"choice","choice":"ham","probabilities":{"spam":0.01,"ham":0.99},"confidence":0.1}}}`))

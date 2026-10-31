@@ -75,7 +75,7 @@ func TestRecordModeArchivesInferenceAndSuppressesAllPunishments(t *testing.T) {
 	if operations.Load() != 0 {
 		t.Fatal("record mode called Telegram moderation")
 	}
-	if scalar(t, path, `SELECT count(*) FROM attempts WHERE error='' AND json_extract(probabilities,'$.violation')=0.99 AND json_extract(request,'$.state.sender_profile.bio')='profile'`) != 1 {
+	if scalar(t, path, `SELECT count(*) FROM attempts WHERE error='' AND json_extract(probabilities,'$.violation')=0.99 AND json_extract(request,'$.state.sender.bio')='profile'`) != 1 {
 		t.Fatal("model evidence missing")
 	}
 }
@@ -205,7 +205,7 @@ func TestOtherBotMessagesAreJudgedUnderTheGroupPolicy(t *testing.T) {
 			m.From.Username = "source_bot"
 			deliver(t, a, 1, m)
 			runModel(t, a, time.Now())
-			if scalar(t, path, `SELECT count(*) FROM attempts WHERE error='' AND json_extract(request,'$.state.telegram_message.from.is_bot')=1`) != 1 {
+			if scalar(t, path, `SELECT count(*) FROM attempts WHERE error='' AND json_extract(request,'$.state.sender.is_bot')=1`) != 1 {
 				t.Fatal("bot message or its source metadata was lost")
 			}
 			if scalar(t, path, `SELECT count(*) FROM revisions WHERE status='succeeded'`) != 1 {

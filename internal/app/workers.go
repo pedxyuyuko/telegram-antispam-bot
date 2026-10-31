@@ -32,18 +32,29 @@ func (a *App) ProcessModel(ctx context.Context, now time.Time) (bool, error) {
 		return true, nil
 	}
 	reused := len(j.State) > 0
+	var inferenceErr error
 	if !reused {
 		debug(diagnostic, "context.started")
-		j.State = m.State(a.Telegram.Profile(ctx, &m, diagnostic))
-		if err := a.Store.SetState(ctx, j.ID, j.State); err != nil {
-			return false, err
+		j.State, inferenceErr = m.ModelState(a.Telegram.Profile(ctx, &m, diagnostic))
+		if inferenceErr == nil {
+			if err := a.Store.SetState(ctx, j.ID, j.State); err != nil {
+				return false, err
+			}
+		} else {
+			inferenceErr = fmt.Errorf("build model context: %w", inferenceErr)
+			debug(diagnostic, "context.failed", "error", inferenceErr)
 		}
 	}
-	debug(diagnostic, "context.ready", "reused", reused, "state_bytes", len(j.State))
 	cfg := a.Config.Snapshot()
-	debug(diagnostic, "model.started", "model", cfg.Model.Name, "question_count", len(j.Snapshot.Questions), "questions", questionIDs(j.Snapshot.Questions), "timeout_seconds", cfg.Model.TimeoutSeconds)
-	result, inferenceErr := a.Model.Evaluate(ctx, cfg.Model, j.Snapshot.Questions, j.State)
-	debug(diagnostic, "model.completed", "success", inferenceErr == nil, "duration_ms", result.Duration.Milliseconds(), "request_bytes", len(result.Request), "response_bytes", len(result.Response))
+	var result decision.Result
+	if inferenceErr == nil {
+		debug(diagnostic, "context.ready", "reused", reused, "state_bytes", len(j.State))
+		debug(diagnostic, "model.started", "model", cfg.Model.Name, "question_count", len(j.Snapshot.Questions), "questions", questionIDs(j.Snapshot.Questions), "timeout_seconds", cfg.Model.TimeoutSeconds)
+		result, inferenceErr = a.Model.Evaluate(ctx, cfg.Model, j.Snapshot.Questions, j.State)
+		debug(diagnostic, "model.completed", "success", inferenceErr == nil, "duration_ms", result.Duration.Milliseconds(), "request_bytes", len(result.Request), "response_bytes", len(result.Response))
+	} else {
+		result.Duration = time.Since(started)
+	}
 	// A graceful stop still gets a short opportunity to save the last attempt.
 	persist, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
