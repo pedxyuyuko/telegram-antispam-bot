@@ -98,13 +98,40 @@ func TestModelContextExpandsUTF16EntitiesAndMediaDescriptions(t *testing.T) {
 }
 
 func TestModelContextPreservesChannelIdentityAndDescription(t *testing.T) {
-	c, _ := compactFixture(t, `{"message_id":1,"chat":{"id":-100,"type":"supergroup"},"sender_chat":{"id":-200,"title":"Publisher","username":"publisher"},"from":{"id":777000,"first_name":"Relay","is_bot":false},"text":"post","forward_origin":{"type":"channel","chat":{"title":"Original","username":"original"}}}`, Profile{Status: "available", Description: "CHANNEL_DESCRIPTION"})
+	c, _ := compactFixture(t, `{"message_id":1,"chat":{"id":-100,"type":"supergroup"},"sender_chat":{"id":-200,"title":"Publisher","username":"publisher"},"from":{"id":1087968824,"first_name":"Relay","is_bot":true},"text":"post","forward_origin":{"type":"channel","chat":{"title":"Original","username":"original"}}}`, Profile{Status: "available", Description: "CHANNEL_DESCRIPTION"})
 	sender := c["sender"].(map[string]any)
 	if sender["name"] != "Publisher" || sender["username"] != "publisher" || sender["description"] != "CHANNEL_DESCRIPTION" {
 		t.Fatal("channel attributed to relay user")
 	}
+	if sender["is_bot"] != nil {
+		t.Fatal("compatibility user's bot flag attributed to the channel")
+	}
 	if c["msg"].(map[string]any)["forwarded_from"] != "Original (@original)" {
 		t.Fatal("forward provenance lost")
+	}
+}
+
+func TestModelContextRetainsAllForwardOriginKinds(t *testing.T) {
+	for _, tc := range []struct{ name, origin, want string }{
+		{"chat", `{"type":"chat","sender_chat":{"id":-200,"title":"Source group","username":"source"}}`, "Source group (@source)"},
+		{"channel", `{"type":"channel","chat":{"id":-200,"title":"Source channel","username":"source"}}`, "Source channel (@source)"},
+		{"user", `{"type":"user","sender_user":{"id":42,"first_name":"Alice","username":"alice"}}`, "Alice (@alice)"},
+		{"hidden_user", `{"type":"hidden_user","sender_user_name":"Hidden author"}`, "Hidden author"},
+	} {
+		for _, quoted := range []bool{false, true} {
+			t.Run(tc.name+"/"+map[bool]string{false: "current", true: "reply"}[quoted], func(t *testing.T) {
+				body := `{"message_id":1,"chat":{"id":-100,"type":"supergroup"},"text":"forward","forward_origin":` + tc.origin + `}`
+				key := "msg"
+				if quoted {
+					body = `{"message_id":2,"chat":{"id":-100,"type":"supergroup"},"text":"reply","reply_to_message":` + body + `}`
+					key = "reply"
+				}
+				c, _ := compactFixture(t, body, Profile{})
+				if got := c[key].(map[string]any)["forwarded_from"]; got != tc.want {
+					t.Fatalf("forward source=%v want %s", got, tc.want)
+				}
+			})
+		}
 	}
 }
 

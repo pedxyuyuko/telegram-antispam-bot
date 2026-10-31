@@ -40,6 +40,7 @@ func (m *Message) ModelState(profile Profile) (json.RawMessage, error) {
 		}
 		sender["name"] = m.SenderChat.Title
 		sender["username"] = nil
+		sender["is_bot"] = nil
 		if source.SenderChat.Username != "" {
 			sender["username"] = source.SenderChat.Username
 		}
@@ -188,16 +189,21 @@ func (m *Message) contextBody() (map[string]any, error) {
 		}
 	}
 	if raw := fields["forward_origin"]; len(raw) > 0 {
+		type originChat struct {
+			Title    string `json:"title"`
+			Username string `json:"username"`
+		}
 		var origin struct {
-			Chat *struct {
-				Title    string `json:"title"`
-				Username string `json:"username"`
-			} `json:"chat"`
-			User       *User  `json:"sender_user"`
-			HiddenName string `json:"sender_user_name"`
+			Chat       *originChat `json:"chat"`
+			SenderChat *originChat `json:"sender_chat"`
+			User       *User       `json:"sender_user"`
+			HiddenName string      `json:"sender_user_name"`
 		}
 		if err := json.Unmarshal(raw, &origin); err != nil {
 			return nil, fmt.Errorf("forward origin: %w", err)
+		}
+		if origin.SenderChat != nil {
+			origin.Chat = origin.SenderChat
 		}
 		var name string
 		if origin.Chat != nil {
