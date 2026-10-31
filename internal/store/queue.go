@@ -51,6 +51,12 @@ func (s *Store) AddRevision(ctx context.Context, in Inbox, m *telegram.Message, 
 		return ArchiveReport{}, err
 	}
 	report := ArchiveReport{ID: id, Status: status, SkipReason: snapshot.SkipReason}
+	if m.BotSenderID() > 0 {
+		bot := botIdentity(m)
+		if _, err := tx.ExecContext(ctx, `UPDATE bot_blacklist SET username=?,name=? WHERE bot_id=?`, bot.Username, bot.Name, bot.ID); err != nil {
+			return ArchiveReport{}, err
+		}
+	}
 	job := Job{ID: id, UpdateID: in.ID, ChatID: m.Chat.ID, MessageID: m.ID, UserID: m.UserID(), Sender: m.SenderKey(), ReceivedAt: in.ReceivedAt, Raw: m.Bytes(), Snapshot: snapshot, Status: status}
 	if status == "pending" {
 		blocked, err := applyBlacklistTx(ctx, tx, job, m)

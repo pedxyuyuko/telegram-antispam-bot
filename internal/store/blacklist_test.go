@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -175,5 +176,42 @@ func TestVersionTwoBootstrapUsesOnlySuccessfulBotDeletions(t *testing.T) {
 	s.db.QueryRow(`SELECT count(*) FROM bot_invocations`).Scan(&links)
 	if actions != 4 || attempts != 4 || links != 0 {
 		t.Fatalf("bootstrap rewrote history: actions=%d attempts=%d invocation_links=%d", actions, attempts, links)
+	}
+}
+
+func TestBotResolutionTracksObservedRenamesAndRejectsKnownHumans(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	if _, err := s.SetBotBlocked(ctx, BotIdentity{ID: 200, Username: "old_bot"}, true, 9, 9001); err != nil {
+		t.Fatal(err)
+	}
+	m := &telegram.Message{ID: 1, Chat: telegram.Chat{ID: -100, Type: "supergroup"}, From: &telegram.User{ID: 200, IsBot: true, FirstName: "Bot", Username: "new_bot"}, Text: "renamed"}
+	raw, _ := json.Marshal(map[string]any{"update_id": 1, "message": m})
+	if err := s.Capture(ctx, []json.RawMessage{raw}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddRevision(ctx, Inbox{ID: 1, Raw: raw, ReceivedAt: testNow.UnixMilli()}, m, Snapshot{Policy: config.Defaults().Base, Questions: config.Defaults().Questions}, "ignored"); err != nil {
+		t.Fatal(err)
+	}
+	bot, err := s.ResolveBot(ctx, "@NEW_BOT")
+	if err != nil || bot.ID != 200 {
+		t.Fatalf("current alias: %+v %v", bot, err)
+	}
+	if _, err := s.ResolveBot(ctx, "@old_bot"); !errors.Is(err, ErrUnknownBot) {
+		t.Fatalf("stale alias accepted: %v", err)
+	}
+	if _, err := s.SetBotBlocked(ctx, BotIdentity{ID: 200, Username: "old_bot"}, true, 9, 9002); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ResolveBot(ctx, "@old_bot"); !errors.Is(err, ErrUnknownBot) {
+		t.Fatal("cached alias overrode the newest captured bot identity")
+	}
+	add(t, s, 2, -100, 2, 50, config.Defaults().Base)
+	if _, err := s.ResolveBot(ctx, "50"); !errors.Is(err, ErrNotBot) {
+		t.Fatalf("known human accepted: %v", err)
+	}
+	bot, err = s.ResolveBot(ctx, "999")
+	if err != nil || bot.ID != 999 {
+		t.Fatalf("unobserved numeric ID: %+v %v", bot, err)
 	}
 }

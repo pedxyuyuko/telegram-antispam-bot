@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,6 +44,72 @@ type BlacklistEntry struct {
 	SourceActionID, ActorID, ReleasedThroughRevision, CreatedAt, UpdatedAt int64
 }
 type BlacklistChange struct{ Changed, Duplicate bool }
+
+var ErrUnknownBot = errors.New("bot username has not been observed")
+var ErrNotBot = errors.New("stored identity is not a bot")
+
+// ResolveBot uses captured Telegram identities. Numeric IDs may be registered
+// before observation; live blacklist matching still requires from.is_bot=true.
+func (s *Store) ResolveBot(ctx context.Context, reference string) (BotIdentity, error) {
+	ref := strings.TrimSpace(reference)
+	if id, err := strconv.ParseInt(ref, 10, 64); err == nil {
+		if id <= 0 {
+			return BotIdentity{}, ErrUnknownBot
+		}
+		var raw []byte
+		err = s.db.QueryRowContext(ctx, `SELECT raw FROM revisions WHERE user_id=? ORDER BY id DESC LIMIT 1`, id).Scan(&raw)
+		if err == nil {
+			var m telegram.Message
+			if err := json.Unmarshal(raw, &m); err != nil {
+				return BotIdentity{}, err
+			}
+			if m.BotSenderID() != id {
+				return BotIdentity{}, ErrNotBot
+			}
+			return botIdentity(&m), nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return BotIdentity{}, err
+		}
+		entry, err := s.BotBlacklist(ctx, id)
+		if err != nil {
+			return BotIdentity{}, err
+		}
+		if entry != nil {
+			return entry.BotIdentity, nil
+		}
+		return BotIdentity{ID: id}, nil
+	}
+	username := strings.ToLower(strings.TrimPrefix(ref, "@"))
+	if username == "" || len(strings.Fields(username)) != 1 {
+		return BotIdentity{}, ErrUnknownBot
+	}
+	var raw []byte
+	err := s.db.QueryRowContext(ctx, `SELECT r.raw FROM revisions r WHERE r.user_id>0 AND json_extract(r.raw,'$.from.is_bot')=1 AND json_extract(r.raw,'$.sender_chat') IS NULL
+ AND lower(json_extract(r.raw,'$.from.username'))=? AND r.id=(SELECT max(x.id) FROM revisions x WHERE x.user_id=r.user_id)
+ ORDER BY r.id DESC LIMIT 1`, username).Scan(&raw)
+	if err == nil {
+		var m telegram.Message
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return BotIdentity{}, err
+		}
+		return botIdentity(&m), nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return BotIdentity{}, err
+	}
+	entry, err := scanBlacklist(s.db.QueryRowContext(ctx, `SELECT `+blacklistColumns+` FROM bot_blacklist b WHERE lower(username)=?
+ AND NOT EXISTS (SELECT 1 FROM revisions r WHERE r.user_id=b.bot_id AND r.id=(SELECT max(x.id) FROM revisions x WHERE x.user_id=b.bot_id)
+ AND (coalesce(json_extract(r.raw,'$.from.is_bot'),0)<>1 OR lower(coalesce(json_extract(r.raw,'$.from.username'),''))<>?))
+ ORDER BY updated_at DESC,bot_id LIMIT 1`, username, username))
+	if err != nil {
+		return BotIdentity{}, err
+	}
+	if entry == nil {
+		return BotIdentity{}, ErrUnknownBot
+	}
+	return entry.BotIdentity, nil
+}
 
 const blacklistColumns = `bot_id,username,name,active,generation,source,coalesce(source_action_id,0),actor_id,released_through_revision,created_at,updated_at`
 
