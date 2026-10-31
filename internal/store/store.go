@@ -135,7 +135,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if version > 3 {
+	if version > 4 {
 		db.Close()
 		return nil, fmt.Errorf("unsupported database schema version %d", version)
 	}
@@ -151,6 +151,11 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	if _, err := tx.Exec(blacklistSchema); err != nil {
+		tx.Rollback()
+		db.Close()
+		return nil, err
+	}
+	if err := migrateBlacklistMetadata(tx); err != nil {
 		tx.Rollback()
 		db.Close()
 		return nil, err

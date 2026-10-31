@@ -17,10 +17,10 @@ CREATE TABLE IF NOT EXISTS bot_blacklist(
  bot_id INTEGER PRIMARY KEY CHECK(bot_id>0),username TEXT NOT NULL DEFAULT '',name TEXT NOT NULL DEFAULT '',
  active INTEGER NOT NULL CHECK(active IN (0,1)),generation INTEGER NOT NULL CHECK(generation>0),
  source TEXT NOT NULL,source_action_id INTEGER REFERENCES actions(id),actor_id INTEGER NOT NULL DEFAULT 0,
- released_through_revision INTEGER NOT NULL DEFAULT 0,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
+ released_through_revision INTEGER NOT NULL DEFAULT 0,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,note TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS bot_blacklist_events(
  id INTEGER PRIMARY KEY,bot_id INTEGER NOT NULL REFERENCES bot_blacklist(bot_id),kind TEXT NOT NULL,
- actor_id INTEGER NOT NULL DEFAULT 0,command_update_id INTEGER UNIQUE,source_action_id INTEGER REFERENCES actions(id),created_at INTEGER NOT NULL);
+ actor_id INTEGER NOT NULL DEFAULT 0,command_update_id INTEGER UNIQUE,source_action_id INTEGER REFERENCES actions(id),created_at INTEGER NOT NULL,detail TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS blacklist_matches(
  revision_id INTEGER PRIMARY KEY REFERENCES revisions(id),bot_id INTEGER NOT NULL REFERENCES bot_blacklist(bot_id),generation INTEGER NOT NULL,created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS action_evidence(
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS bot_invocations(
  source_action_id INTEGER PRIMARY KEY REFERENCES actions(id),bot_id INTEGER NOT NULL,chat_id INTEGER NOT NULL,message_id INTEGER NOT NULL,
  user_id INTEGER NOT NULL,fingerprint TEXT NOT NULL,target_action_id INTEGER REFERENCES actions(id),created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS pending_bot_invocations ON bot_invocations(chat_id,message_id) WHERE target_action_id IS NULL;
-PRAGMA user_version=3;`
+PRAGMA user_version=4;`
 
 type BotIdentity struct {
 	ID             int64
@@ -45,6 +45,7 @@ type BlacklistEntry struct {
 	Active                                                                 bool
 	Generation                                                             int64
 	Source                                                                 string
+	Note                                                                   string
 	SourceActionID, ActorID, ReleasedThroughRevision, CreatedAt, UpdatedAt int64
 }
 type BlacklistChange struct{ Changed, Duplicate bool }
@@ -115,11 +116,11 @@ func (s *Store) ResolveBot(ctx context.Context, reference string) (BotIdentity, 
 	return entry.BotIdentity, nil
 }
 
-const blacklistColumns = `bot_id,username,name,active,generation,source,coalesce(source_action_id,0),actor_id,released_through_revision,created_at,updated_at`
+const blacklistColumns = `bot_id,username,name,active,generation,source,coalesce(source_action_id,0),actor_id,released_through_revision,created_at,updated_at,note`
 
 func scanBlacklist(row scanner) (*BlacklistEntry, error) {
 	var b BlacklistEntry
-	err := row.Scan(&b.ID, &b.Username, &b.Name, &b.Active, &b.Generation, &b.Source, &b.SourceActionID, &b.ActorID, &b.ReleasedThroughRevision, &b.CreatedAt, &b.UpdatedAt)
+	err := row.Scan(&b.ID, &b.Username, &b.Name, &b.Active, &b.Generation, &b.Source, &b.SourceActionID, &b.ActorID, &b.ReleasedThroughRevision, &b.CreatedAt, &b.UpdatedAt, &b.Note)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -138,75 +139,37 @@ func blacklistTx(ctx context.Context, tx *sql.Tx, id int64) (*BlacklistEntry, er
 // Manual changes are keyed by the Telegram update, so replaying a command cannot
 // undo a later owner decision. Removed rows remain as audit tombstones.
 func (s *Store) SetBotBlocked(ctx context.Context, bot BotIdentity, blocked bool, actor, update int64) (BlacklistChange, error) {
-	if bot.ID <= 0 || actor <= 0 || update <= 0 {
-		return BlacklistChange{}, errors.New("positive bot, actor and update IDs are required")
-	}
-	s.botDispatchMu.Lock()
-	defer s.botDispatchMu.Unlock()
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return BlacklistChange{}, err
-	}
-	defer tx.Rollback()
-	var duplicate int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM bot_blacklist_events WHERE command_update_id=?`, update).Scan(&duplicate); err != nil {
-		return BlacklistChange{}, err
-	}
-	if duplicate > 0 {
-		return BlacklistChange{Duplicate: true}, nil
-	}
-	old, err := blacklistTx(ctx, tx, bot.ID)
-	if err != nil {
-		return BlacklistChange{}, err
-	}
-	now := time.Now().UnixMilli()
-	generation, created, released := int64(1), now, int64(0)
-	changed := blocked
-	if old != nil {
-		generation, created, released = old.Generation, old.CreatedAt, old.ReleasedThroughRevision
-		changed = old.Active != blocked
-		if changed {
-			generation++
-		}
-		if bot.Username == "" {
-			bot.Username = old.Username
-		}
-		if bot.Name == "" {
-			bot.Name = old.Name
-		}
-	}
-	if !blocked {
-		if err := tx.QueryRowContext(ctx, `SELECT coalesce(max(id),0) FROM revisions`).Scan(&released); err != nil {
-			return BlacklistChange{}, err
-		}
-	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO bot_blacklist(bot_id,username,name,active,generation,source,actor_id,released_through_revision,created_at,updated_at)
- VALUES(?,?,?,?,?,'manual',?,?,?,?) ON CONFLICT(bot_id) DO UPDATE SET username=excluded.username,name=excluded.name,active=excluded.active,generation=excluded.generation,source='manual',source_action_id=NULL,actor_id=excluded.actor_id,released_through_revision=excluded.released_through_revision,updated_at=excluded.updated_at`, bot.ID, bot.Username, bot.Name, blocked, generation, actor, released, created, now)
-	if err != nil {
-		return BlacklistChange{}, err
-	}
 	kind := "manual_remove"
 	if blocked {
 		kind = "manual_add"
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO bot_blacklist_events(bot_id,kind,actor_id,command_update_id,created_at) VALUES(?,?,?,?,?)`, bot.ID, kind, actor, update, now); err != nil {
-		return BlacklistChange{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return BlacklistChange{}, err
-	}
-	return BlacklistChange{Changed: changed}, nil
+	return s.changeBotBlacklist(ctx, bot, BlacklistEdit{Active: &blocked}, actor, update, true, kind)
 }
 
 func (s *Store) ListBlockedBots(ctx context.Context, offset, limit int) ([]BlacklistEntry, int, error) {
+	return s.ListBotBlacklist(ctx, "active", offset, limit)
+}
+
+func (s *Store) ListBotBlacklist(ctx context.Context, status string, offset, limit int) ([]BlacklistEntry, int, error) {
 	if offset < 0 || limit < 1 || limit > 100 {
 		return nil, 0, errors.New("invalid blacklist page")
 	}
+	where := ""
+	switch status {
+	case "active":
+		where = "active=1"
+	case "inactive":
+		where = "active=0"
+	case "all":
+		where = "1=1"
+	default:
+		return nil, 0, errors.New("invalid blacklist status")
+	}
 	var total int
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM bot_blacklist WHERE active=1`).Scan(&total); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM bot_blacklist WHERE `+where).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+blacklistColumns+` FROM bot_blacklist WHERE active=1 ORDER BY bot_id LIMIT ? OFFSET ?`, limit, offset)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+blacklistColumns+` FROM bot_blacklist WHERE `+where+` ORDER BY bot_id LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
