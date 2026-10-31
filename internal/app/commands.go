@@ -22,7 +22,7 @@ type App struct {
 	Log      *slog.Logger
 }
 
-var commands = map[string]bool{"as_help": true, "start": true, "as_config": true, "as_set": true, "as_reset": true, "as_reload": true, "as_status": true, "as_spam": true, "as_ham": true, "as_botban": true, "as_botunban": true, "as_botlist": true}
+var commands = map[string]bool{"as_help": true, "start": true, "as_config": true, "as_set": true, "as_reset": true, "as_reload": true, "as_status": true, "as_spam": true, "as_ham": true, "as_botban": true, "as_botunban": true, "as_botlist": true, "as_botget": true, "as_botedit": true}
 
 func (a *App) identify(m *telegram.Message) (name, args string) {
 	text := strings.TrimSpace(m.Text)
@@ -62,7 +62,7 @@ func (a *App) identify(m *telegram.Message) (name, args string) {
 
 func sharedCommand(name, args string) bool {
 	switch name {
-	case "as_reload", "as_botban", "as_botunban", "as_botlist":
+	case "as_reload", "as_botban", "as_botunban", "as_botlist", "as_botget", "as_botedit":
 		return true
 	}
 	return (name == "as_config" && args == "base") || (name == "as_set" && len(strings.Fields(args)) > 0 && strings.Fields(args)[0] == "base")
@@ -172,9 +172,11 @@ const help = `群管理员命令：
 /as_config base — 查看共享配置
 /as_set base <参数路径> <JSON值> — 修改共享配置
 /as_reload — 校验并重载服务器配置文件
-/as_botlist [偏移量] — 查看全局 bot 黑名单，每页 50 个
+/as_botlist [active|inactive|all] [偏移量] — 查看全局 bot 黑名单，每页 50 个
 /as_botban <bot ID 或 @用户名> — 加入全局黑名单；可回复 bot 消息使用
 /as_botunban <bot ID 或 @用户名> — 移除；新广告再次删除成功后可重新入名单
+/as_botget <bot ID 或 @用户名> — 查看状态、备注和来源；可回复 bot 消息使用
+/as_botedit <bot ID 或 @用户名> <JSON> — 修改 note 备注或 active 状态；支持回复 bot 消息
 
 示例：
 /as_set mode "record"
@@ -185,7 +187,7 @@ const help = `群管理员命令：
 func (a *App) command(ctx context.Context, updateID int64, m *telegram.Message, name, args string) (string, error) {
 	diagnostic := a.diagnostics(m.Chat.ID, "message", m.ID, "update", updateID, "command", name, "actor", m.UserID())
 	switch name {
-	case "as_botban", "as_botunban", "as_botlist":
+	case "as_botban", "as_botunban", "as_botlist", "as_botget", "as_botedit":
 		return a.botBlacklistCommand(ctx, updateID, m, name, args)
 	case "start", "as_help":
 		return help, nil
