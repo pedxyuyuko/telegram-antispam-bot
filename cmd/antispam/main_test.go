@@ -76,14 +76,14 @@ func TestExampleProvidesGroupedScoringOutsideRepository(t *testing.T) {
 			t.Fatalf("removed question %s remains selectable in the example", removed)
 		}
 	}
-	for _, group := range []string{"profile", "message", "entry", "crosslink", "benign", "decision"} {
+	if len(c.QuestionGroups) != 2 {
+		t.Fatalf("want two focused question groups, got %d", len(c.QuestionGroups))
+	}
+	for _, group := range []string{"content", "profile"} {
 		p := c.Base
 		p.Questions = []string{group + ".*"}
 		questions, err := c.SelectedQuestions(p)
 		want := 4
-		if group == "benign" {
-			want = 2
-		}
 		if err != nil || len(questions) != want {
 			t.Fatalf("incomplete question group %s: %v %v", group, questions, err)
 		}
@@ -97,8 +97,16 @@ func TestExampleProvidesGroupedScoringOutsideRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e, err := decision.EvaluatePolicy(questions, c.Base, decision.Result{Probabilities: map[string]float64{"profile.promotion": .99, "message.promotion": .99}})
-	if err != nil || e.Score != 70 || e.Condition != expression.True {
+	if len(questions) != 8 {
+		t.Fatalf("want eight selected questions, got %d", len(questions))
+	}
+	p := map[string]float64{}
+	for id := range questions {
+		p[id] = .01
+	}
+	p["content.promotion"], p["content.money"] = .85, .85
+	e, err := decision.EvaluatePolicy(questions, c.Base, decision.Result{Probabilities: p})
+	if err != nil || e.Score != 100 || e.Condition != expression.True {
 		t.Fatalf("generated example lost custom scoring: %+v %v", e, err)
 	}
 }
@@ -124,18 +132,45 @@ func TestGroupedExampleValidatesAndScoresRepresentativeMessages(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		probabilities map[string]float64
-		want          expression.Truth
+		wantScore     float64
 	}{
-		{"profile_only", map[string]float64{"profile.promotion": .99}, expression.Unknown},
-		{"promotion", map[string]float64{"profile.promotion": .99, "message.promotion": .99}, expression.True},
-		{"warning", map[string]float64{"profile.promotion": .99, "message.promotion": .99, "benign.warning": .99, "decision.fraud": .01}, expression.False},
+		{"money_without_promotion", map[string]float64{"content.money": .99}, 0},
+		{"promotion_without_topic", map[string]float64{"content.promotion": .99}, 0},
+		{"message_money_boundary", map[string]float64{"content.promotion": .85, "content.money": .85}, 100},
+		{"message_sexual_boundary", map[string]float64{"content.promotion": .85, "content.sexual": .85}, 100},
+		{"profile_money_boundary", map[string]float64{"profile.promotion": .85, "profile.money": .85}, 100},
+		{"profile_sexual_boundary", map[string]float64{"profile.promotion": .85, "profile.sexual": .85}, 100},
+		{"promotion_below_boundary", map[string]float64{"content.promotion": .84999, "content.money": .99}, 0},
+		{"topic_below_boundary", map[string]float64{"content.promotion": .99, "content.money": .84999, "content.sexual": .84999}, 0},
+		{"sources_are_independent", map[string]float64{"content.promotion": .99, "profile.money": .99}, 0},
+		{"two_topics_one_source", map[string]float64{"content.promotion": .99, "content.money": .99, "content.sexual": .99}, 100},
+		{"both_sources", map[string]float64{"content.promotion": .99, "content.money": .99, "profile.promotion": .99, "profile.sexual": .99}, 200},
+		{"earnings_are_observational", map[string]float64{"content.promotion": .99, "content.earnings": .99, "profile.promotion": .99, "profile.earnings": .99}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			e, err := decision.EvaluatePolicy(q, c.Base, decision.Result{Probabilities: tc.probabilities})
-			if err != nil || e.Condition != tc.want {
+			p := map[string]float64{}
+			for id := range q {
+				p[id] = .01
+			}
+			for id, value := range tc.probabilities {
+				p[id] = value
+			}
+			e, err := decision.EvaluatePolicy(q, c.Base, decision.Result{Probabilities: p})
+			want := expression.False
+			if tc.wantScore >= 100 {
+				want = expression.True
+			}
+			if err != nil || e.Score != tc.wantScore || e.Condition != want {
 				t.Fatalf("unexpected example behavior: %+v %v", e, err)
 			}
 		})
+	}
+	for _, id := range []int64{-1001234567890, -1009876543210} {
+		p := c.ForGroup(id)
+		selected, err := c.SelectedQuestions(p)
+		if err != nil || len(selected) != 8 {
+			t.Fatalf("group %d lost the eight-question policy: %v", id, err)
+		}
 	}
 }
 

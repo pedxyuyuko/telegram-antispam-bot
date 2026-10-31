@@ -132,7 +132,7 @@ export SYSTEMONE_API_KEY='替换成决策服务密钥'  # 本地服务关闭鉴�
 推荐使用超级群；限时禁言依赖 Telegram 的超级群限制成员接口。
 程序使用 long polling；已有 webhook 时启动会提示先移除 webhook。
 
-`-check` 仅校验配置；`-example` 向标准输出打印包含 6 组 22 道候选题和计分规则的完整示例，与 `examples/scoring.json` 共用题库。示例嵌入二进制，任意工作目录和容器内均可生成。
+`-check` 仅校验配置；`-example` 向标准输出打印包含 2 组 8 道题和计分规则的完整示例，与 `examples/scoring.json` 共用题库。示例嵌入二进制，任意工作目录和容器内均可生成。
 数据库路径相对于配置文件所在目录解析，默认是 `data/bot.sqlite`。
 同一数据库由一个机器人进程独占；重启时会恢复已收到的更新和剩余待判任务。
 
@@ -168,7 +168,7 @@ export SYSTEMONE_API_KEY='替换成决策服务密钥'  # 本地服务关闭鉴�
 }
 ```
 
-这是完整配置中的策略部分。示例群最终使用“600 秒内至少 3 条消息命中，禁言 120 秒”，其余参数继承共享值。
+这是使用内建五题的传统单题策略片段，用于演示群级继承。示例群最终使用“600 秒内至少 3 条消息命中，禁言 120 秒”，其余参数继承共享值。
 `false` 和 `0` 按明确设置处理；删除覆盖项即可恢复继承。配置拒绝未知字段、重复键和 `null`。
 文件中的 `base.rules` 一旦显式提供，就定义完整规则集合；省略时使用内建默认规则。题库使用 `question_groups` 或显式的顶层 `questions`；两者均省略时使用内建五题。
 例如 `/as_set base rules {}` 清空共享规则；群级 `rules` 继续逐规则、逐字段覆盖。
@@ -188,7 +188,7 @@ export SYSTEMONE_API_KEY='替换成决策服务密钥'  # 本地服务关闭鉴�
 同时命中多条规则时可以删除消息并处罚成员；成员处罚优先踢人，其次取最长禁言时长。
 踢人后成员可以通过有效邀请重新加入。
 
-默认配置含单条删除规则和累计禁言规则；概率值是内测起点，先用真实群消息和人工标注评估再开启处罚。
+内建传统配置含单条删除规则和累计禁言规则；当前八题示例启用单条删除、关闭累计禁言，并保持只记录模式。概率值是试运行起点，先用真实群消息和人工标注评估再开启处罚。
 群主、群管理员和匿名管理员的普通发言按 `ignored` 留档，跳过模型判断与自动处罚；合法管理命令继续执行。机器人自身输出同样跳过判断，机器人所有者继续享有自动处罚豁免。
 频道自动同步到关联讨论群的消息按 Telegram 的 `is_automatic_forward` 标记跳过。普通成员手动转发频道内容、回复同步帖子的消息继续检测。
 管理员身份在接收和模型处理前查询确认；查询异常会记录警告并保留原有检测流程，自动处罚前仍会重新核验身份。
@@ -196,7 +196,7 @@ export SYSTEMONE_API_KEY='替换成决策服务密钥'  # 本地服务关闭鉴�
 
 ### 问题组、自定义加减分与最终条件
 
-`examples/scoring.json` 是可直接校验的完整配置：包含 6 组共 22 道候选题，共享策略选用其中 9 道，两个群展示局部覆盖。复制后设置自己的所有者 ID、模型名和群 ID：
+`examples/scoring.json` 是可直接校验的完整配置：`content` 组针对模型材料的 `.msg`，`profile` 组针对 `.sender`；每组询问宣传、金钱、赚钱承诺、色情，共 8 道是非题。问句与正反标准都明确指定读取区域，示例群展示待判容量的局部覆盖。复制后设置自己的所有者 ID、模型名和群 ID：
 
 ```sh
 cp -n examples/scoring.json config.json
@@ -207,7 +207,7 @@ chmod 600 config.json
 容器部署时将目标路径换成 `runtime/config.json`。示例保持 `mode: "record"`；权重和阈值用于试运行，使用本群样本评估后再开启处罚。
 
 - `question_groups.<组名>.<题名>` 定义题目，包含 `type`、`instructions` 和可选的正反标准或选项 `criteria`。
-- `base.questions` / `groups.<群ID>.questions` 选择单题，例如 `"message.promotion"`，或整组，例如 `"profile.*"`。数组整体替换；重复选择、空数组和未知题目在重载时拒绝。每群最多选 256 题。
+- `base.questions` / `groups.<群ID>.questions` 选择单题，例如 `"content.promotion"`，或整组，例如 `"profile.*"`。数组整体替换；重复选择、空数组和未知题目在重载时拒绝。每群最多选 256 题。
 - 分组配置使用 `question_groups` 定义题库，通过 `base.questions` 和群级 `questions` 选题。顶层空 `questions` 字段可以省略。显式提供的旧版平铺题库继续兼容；两种题库均省略时使用内建五题。当前 `-example` 输出分组题库及计分配置。
 - `scoring.initial` 是初始分；`scoring.rules` 是整组替换的加减分项数组，每项包含唯一的 `name`、布尔表达式 `when`、有符号数值 `add`。匹配项全部累计，负数扣分，最终总分允许为负数。
 - `condition` 是最终门槛。仅成立时进入已有的累计次数与动作处理；省略该字段保留原有规则行为。
@@ -216,24 +216,25 @@ chmod 600 config.json
 
 ```json
 {
-  "questions": ["profile.promotion", "message.promotion", "benign.warning", "decision.fraud"],
+  "questions": ["content.*", "profile.*"],
   "scoring": {
     "initial": 0,
     "rules": [
-      {"name": "资料推广", "when": "p.profile.promotion >= 0.85", "add": 20},
-      {"name": "消息推广", "when": "p.message.promotion > 0.80", "add": 50},
-      {"name": "风险提醒", "when": "p.benign.warning >= 0.90", "add": -50}
+      {"name": "消息宣传金钱或色情", "when": "p.content.promotion >= 0.85 && (p.content.money >= 0.85 || p.content.sexual >= 0.85)", "add": 100},
+      {"name": "资料宣传金钱或色情", "when": "p.profile.promotion >= 0.85 && (p.profile.money >= 0.85 || p.profile.sexual >= 0.85)", "add": 100}
     ]
   },
-  "condition": "score >= 60 || p.decision.fraud >= 0.98",
+  "condition": "score >= 100",
   "rules": {
     "delete": {"enabled": true, "count": 1, "action": "delete"},
-    "repeat": {"enabled": true, "count": 3, "window_seconds": 600, "action": "mute", "duration_seconds": 600}
+    "repeat": {"enabled": false, "count": 3, "window_seconds": 600, "action": "mute", "duration_seconds": 600}
   }
 }
 ```
 
 这里的处置规则省略 `question` 和 `threshold`，以最终 `condition` 成立作为一次命中。继续保留 `question` 的旧规则还会检查该题概率门槛。每条消息在同一规则、同一计分定义下计一次；更改题目定义、计分或最终条件会启动独立的累计系列。处置次数、窗口和禁言时长的调整继续使用同一系列。
+
+消息与资料各自在本区域内满足“宣传 ≥ 85%，且金钱或色情 ≥ 85%”时加 100 分；总分达到 100 即满足最终条件，两个区域同时命中时为 200 分。赚钱承诺题保留判断与审计，当前示例的加分条件使用宣传、金钱和色情三项。
 
 表达式支持 `>`、`>=`、`<`、`<=`、`==`、`!=`、`&&`、`||`、`!` 和括号：
 
@@ -282,7 +283,7 @@ chmod 600 config.json
 
 最终 `condition` 使用三值逻辑：`true`、`false`、`unknown`。`true || unknown` 为 `true`，`false && unknown` 为 `false`，其余依赖未知答案的结果保留 `unknown`；对 `unknown` 取反仍为 `unknown`。只有 `true` 触发动作。所有分数、逐项命中或跳过原因、最终条件结果均保存到 `evaluations` 表。
 
-题库按实际材料选用：当前输入包含可获取的资料、完整消息、回复与引用；`crosslink.repeated_promotion` 需要额外提供本群近期记录，因此示例共享策略暂时排除该题。涉及个人频道、可信身份或群规的题目也应按已提供的材料与群内场景启用或调整。题目数量与识别效果需要通过实际样本验证。
+题库按实际材料选用：当前模型输入提供 `.sender`、`.reply`、`.msg` 三个来源区域，原始完整消息单独归档。八题示例聚焦当前发言与资料中的宣传及主题；群历史、可信身份、群规及其他保护条件可结合实际材料扩展。题目数量、阈值与识别效果需要通过实际样本验证。
 
 ## Telegram 管理命令
 
@@ -294,10 +295,10 @@ chmod 600 config.json
 | `/as_config` | 群管理员：查看本群最终配置及本群覆盖项 |
 | `/as_set mode "record"` | 群管理员：切换本群模式，启用处罚时改为 `"enforce"` |
 | `/as_set queue_limit 50` | 群管理员：修改本群待判容量，缩小时立即淘汰最旧待判版本 |
-| `/as_set questions ["message.promotion","decision.fraud"]` | 群管理员：替换本群选题；计分和条件引用需要与新选题一致 |
-| `/as_set condition "score >= 75"` | 群管理员：修改最终处置门槛 |
+| `/as_set questions ["content.*","profile.*"]` | 群管理员：替换本群选题；计分和条件引用需要与新选题一致 |
+| `/as_set condition "score >= 100"` | 群管理员：修改最终处置门槛 |
 | `/as_set min_confidence 0.85` | 群管理员：修改选择题与评分题的置信度门槛 |
-| `/as_set scoring.rules [{"name":"诈骗","when":"p.decision.fraud > 0.9","add":80}]` | 群管理员：替换本群加减分项 |
+| `/as_set scoring.initial 0` | 群管理员：修改本群初始分 |
 | `/as_set rules.repeat.duration_seconds 120` | 群管理员：修改本群某条规则的参数 |
 | `/as_reset rules.repeat.duration_seconds` | 群管理员：恢复该参数的共享继承 |
 | `/as_status` | 群管理员：查看本群版本处理统计 |
@@ -317,19 +318,25 @@ chmod 600 config.json
 命令检测到文件已被外部修改时会要求先重载，保护手工编辑的内容。
 数据库位置和 Telegram 连接设置的变更在重启后生效；模型连接、题目及策略支持重载。
 问题组定义通过服务器配置文件修改后执行 `/as_reload`。选题、计分项和条件需要同时调整时，推荐一次编辑文件并校验重载，保持整份配置有效。
+本次上下文结构升级需要重启新二进制；新进程会同时载入新格式和新配置。后续单纯修改题目、概率门槛或计分可以继续通过 `/as_reload` 生效。
 
 ## 消息材料与模型协议
 
-每份判断材料含发言者名字、用户名、可获取的简介，以及完整的 Telegram 消息 JSON。
-正文、媒体配文、格式化实体、隐藏链接目标、按钮文字与链接、inline bot 来源、转发、回复和其他 API 字段均保留。
-额外展开格式化实体的可见文字，正确处理 Telegram 使用的 UTF-16 偏移量。
+原始 Telegram 更新及消息 JSON 完整留档。发给模型的 `state` 使用三个顶层字段：
 
-简介通过额外查询获取并短期缓存，查询结果附带获取状态；Telegram 返回的资料可用性受其接口限制。
+- `sender`：发言者名字、用户名、机器人标记、可获取的简介和频道介绍；简介文本缺失时 `bio` 为 `null`。
+- `reply`：被回复消息的作者、正文、配文、按钮、链接与媒体说明；没有回复时为 `null`，引用保留一层。
+- `msg`：当前消息的正文、配文、按钮、链接、媒体说明、inline bot 和转发来源。
+
+同文案、同目标的按钮合并为 `text`、`link`、`count`；目标地址在本区域的 `links` 中存一份。隐藏链接展开为 `text_links` 或 `caption_links`，正确处理 Telegram 使用的 UTF-16 偏移量。每个区域独立编号链接，避免当前消息与引用目标混淆。
+模型材料保留音视频时长、文件名、标题、表演者等可见说明。文件传输 ID、时间戳、按钮颜色、格式化偏移量及未知 API 字段留在原始归档中。
+
+简介通过额外查询获取并短期缓存，获取状态记录在诊断日志中；Telegram 返回的资料可用性受其接口限制。
 媒体消息保留 API 已提供的文字和元数据；图片、二维码、音视频内容识别属于后续范围。
 实际收到的其他机器人群消息、用户经由 inline bot 发布的消息均参与检测，原始 `from.is_bot` 标记和来源信息继续提供给模型。管理员身份与频道自动同步的跳过规则同样适用；经过权限验证的管理命令继续走管理流程。Telegram 决定具体的消息投递范围。
 更新程序后，新收到的其他机器人消息进入待判队列；历史上标为 `ignored` 的记录保持原始归档状态。
 
-默认问题是：推广意图、诈骗诱导、黑灰产招揽、正常讨论语境、最终违规判断。
+八题示例在消息与资料中分别判断宣传、金钱、赚钱承诺、色情。省略所有题库定义时，内建传统五题仍可使用。
 顶层 `questions` 或 `question_groups` 可在配置中修改或扩展，支持 `noul`、`choice`、`score`，每题包含 `instructions`。`noul` 的 `criteria` 可省略；提供时包含 `true`、`false` 两项说明。`choice` 包含 2–255 个选项；`score` 包含 2–10 个从低到高的等级说明。
 客户端发送 `state`、`model`、已选 `questions`，保留题目标准，验证模型名、答案类型、完整性、概率分布和等级范围。协议错误仍进入失败重试；合法答案的低置信度按逐题弃答处理。
 所有问题共同使用这条消息的材料，各题独立作答。
@@ -346,6 +353,7 @@ chmod 600 config.json
 模型恢复后继续处理剩余任务。
 
 每个消息版本保存接收时的题目和策略快照，首次查询到的资料随模型输入保存。
+已保存的旧版模型输入继续原样复用；升级后的新材料使用三个来源字段。材料构建异常也会保存失败尝试并按重试间隔调度。
 跳过原因保存在 `revisions.snapshot.skip_reason`。旧版已经入队的消息会在模型调用前重新检查管理员与自动同步条件；跳过时保留原始消息、旧尝试记录及策略，关闭本次待判工作。已排队的自动同步消息处罚也会在发送前取消。
 自动处罚发送前再次核对当前模式、规则、题目、最新消息版本和目标身份。
 记录模式接收的消息保持观察性质；已实际发送的处罚对同一消息和同种动作进行去重。
@@ -383,7 +391,7 @@ SQLite 中的主要表：
 | `model.skipped` | 已领取任务因管理员身份、频道自动同步等原因跳过模型，及状态是否成功写为 ignored |
 | `queue.evicted` / `queue.resized` | 队列容量、实际淘汰数、触发原因；启动恢复和修改容量也会记录 |
 | `profile.started` / `profile.completed` / `profile.cache_hit` | 资料查询耗时、获取状态、缓存命中，以及是否获得简介或说明 |
-| `context.started` / `context.ready` | 判断材料是否复用数据库快照、材料字节数 |
+| `context.started` / `context.ready` / `context.failed` | 判断材料是否复用数据库快照、材料字节数、构建异常 |
 | `model.claimed` / `model.started` / `model.completed` | 排队时间、模型名、题目列表、超时设置、调用耗时、请求及响应字节数 |
 | `model.answers` | 各题概率、服务置信度、有效或弃答状态与原因 |
 | `policy.scored` | 总分、各加减分项的命中／跳过情况、最终条件表达式及三值结果 |
@@ -400,8 +408,8 @@ SQLite 中的主要表：
 下面是只记录模式的日志示意，省略部分字段：
 
 ```json
-{"level":"DEBUG","event":"model.started","chat":-1001234567890,"message":42,"revision":100,"question_count":9,"timeout_seconds":20}
-{"level":"DEBUG","event":"policy.scored","chat":-1001234567890,"message":42,"revision":100,"attempt":101,"score":75,"condition_result":"true"}
+{"level":"DEBUG","event":"model.started","chat":-1001234567890,"message":42,"revision":100,"question_count":8,"timeout_seconds":20}
+{"level":"DEBUG","event":"policy.scored","chat":-1001234567890,"message":42,"revision":100,"attempt":101,"score":100,"condition_result":"true"}
 {"level":"DEBUG","event":"action.planned","chat":-1001234567890,"message":42,"revision":100,"attempt":101,"action_id":12,"action":"delete","status":"recorded"}
 ```
 

@@ -2,126 +2,48 @@
   "owner_ids": [123456789],
   "model": {"base_url": "http://127.0.0.1:8000", "name": "replace-with-served-model-name"},
   "question_groups": {
-    "profile": {
-      "name_promotion": {
-        "type": "noul",
-        "instructions": "名字或用户名是否直接带有招揽业务、推广或引流信息？",
-        "criteria": {"true": "名字或用户名明确表达业务招揽、推广对象或引流入口。", "false": "名字或用户名属于普通称呼、身份或兴趣标识。"}
-      },
+    "content": {
       "promotion": {
         "type": "noul",
-        "instructions": "个人简介是否在推广商品、服务、项目或社群？",
-        "criteria": {"true": "简介明确包含推销、客户招揽或推广渠道。", "false": "简介属于普通个人介绍、职业描述或兴趣说明。"}
+        "instructions": "在 JSON 顶层 .msg 里，正文、配文和按钮文字是否在宣传或招揽？",
+        "criteria": {"true": ".msg 的正文、配文或按钮文字在宣传或招揽。", "false": ".msg 的这些文字没有宣传和招揽。"}
       },
-      "illicit": {
+      "money": {
         "type": "noul",
-        "instructions": "简介或可获取的个人频道介绍是否在招揽诈骗、赌博、洗钱、盗号等业务？",
-        "criteria": {"true": "资料明确宣传或招揽这些业务。", "false": "资料属于普通介绍、举报、研究或反诈提醒。"}
-      },
-      "impersonation": {
-        "type": "noul",
-        "instructions": "账号宣称的管理员、官方客服或平台身份，是否与已知可信身份信息冲突？",
-        "criteria": {"true": "宣称的身份与提供的可信身份信息存在具体冲突。", "false": "身份信息相符，或资料仅展示普通自我介绍。"}
-      }
-    },
-    "message": {
-      "promotion": {
-        "type": "noul",
-        "instructions": "当前发言是否在主动推销产品、服务、账号、社群或项目？",
-        "criteria": {"true": "作者主动推销或招揽购买、加入、注册、联系。", "false": "作者在正常讨论、回应明确需求、分析或举报广告。"}
+        "instructions": "在 JSON 顶层 .msg 里，正文、配文和按钮文字是否涉及金钱？",
+        "criteria": {"true": ".msg 的正文、配文或按钮文字中有金钱相关内容。", "false": ".msg 的这些文字中没有金钱相关内容。"}
       },
       "earnings": {
         "type": "noul",
-        "instructions": "是否以兼职、招聘、返佣、投资收益或空投等奖励招揽参与者？",
-        "criteria": {"true": "报酬或奖励被用来邀请他人参与具体活动。", "false": "作者在讨论、询问、举报或分析此类活动。"}
+        "instructions": "在 JSON 顶层 .msg 里，正文、配文和按钮文字是否承诺读者能够赚钱？",
+        "criteria": {"true": ".msg 的正文、配文或按钮文字承诺读者能够赚钱。", "false": ".msg 的这些文字没有赚钱承诺。"}
       },
-      "testimonial": {
+      "sexual": {
         "type": "noul",
-        "instructions": "是否通过收益见证、成功案例或推荐体验，为具体对象招揽用户？",
-        "criteria": {"true": "作者以成功经历或收益佐证引导他人参与具体项目。", "false": "作者在客观讨论个人经历、产品体验或风险。"}
-      },
-      "obfuscation": {
-        "type": "noul",
-        "instructions": "是否通过谐音、拆字、特殊符号等写法表达推广或招揽内容？",
-        "criteria": {"true": "变体写法表达可辨认的推广、招揽或引流意图。", "false": "写法属于普通口语、梗、拼写错误或技术内容。"}
+        "instructions": "在 JSON 顶层 .msg 里，正文、配文和按钮文字是否涉及色情？",
+        "criteria": {"true": ".msg 的正文、配文或按钮文字中有色情相关内容。", "false": ".msg 的这些文字中没有色情相关内容。"}
       }
     },
-    "entry": {
-      "profile_funnel": {
-        "type": "noul",
-        "instructions": "是否引导读者私信、查看简介或访问个人频道？",
-        "criteria": {"true": "当前作者明确或通过上下文暗示读者私信、查看简介或访问个人频道；联系目的可以是推广、交易或普通交流。", "false": "消息属于普通讨论、信息说明或纯引用，行动邀请仅属于被引用者。"}
-      },
-      "call_to_action": {
-        "type": "noul",
-        "instructions": "链接、按钮或机器人入口是否引导读者交易、付费、注册、加群或参加推广活动？",
-        "criteria": {"true": "可见文字与入口构成明确的交易或推广行动邀请。", "false": "入口用于正常资料分享、技术说明或风险提醒。"}
-      },
-      "deceptive_link": {
-        "type": "noul",
-        "instructions": "链接的显示文字与真实地址之间，是否存在可见的冒充官方或误导访问目标的迹象？",
-        "criteria": {"true": "显示文字宣称的目标与实际地址存在具体的欺骗线索。", "false": "可见地址与用途相符，或链接用于明确标注的引用与分析。"}
-      },
-      "sensitive_request": {
-        "type": "noul",
-        "instructions": "是否要求读者交出敏感凭据、授予资产操作权限，或支付可疑前置费用？",
-        "criteria": {"true": "当前作者要求读者提供密码、验证码、助记词，授权操作资产，或支付有具体可疑线索的保证金、解冻费等前置费用。", "false": "作者在提醒、分析或举报此类要求，或进行普通技术说明。"}
-      }
-    },
-    "crosslink": {
-      "profile_destination": {
-        "type": "noul",
-        "instructions": "当前发言是否把读者引向个人资料中宣传的具体对象？",
-        "criteria": {"true": "消息中的指引与资料里的推广对象形成明确联系。", "false": "本次发言属于独立交流；资料里的推广对象与本次发言之间缺乏明确的指向联系。"}
-      },
-      "attention_bait": {
-        "type": "noul",
-        "instructions": "当前搭讪或吸引注意的内容，是否有明确线索表明它服务于资料中的推广？",
-        "criteria": {"true": "消息与资料有具体呼应，共同邀请读者接触推广对象。", "false": "发言属于普通互动，推广意图缺乏具体的消息关联证据。"}
-      },
-      "quoted_amplification": {
-        "type": "noul",
-        "instructions": "当前作者是否利用转发、回复、引用或 inline bot 内容，为其中的推广背书或导流？",
-        "criteria": {"true": "当前作者明确支持、推荐或放大引用内容中的推广。", "false": "当前作者在举报、质疑、分析或提醒相关内容。"}
-      },
-      "repeated_promotion": {
-        "type": "noul",
-        "instructions": "根据本群已保存的近期记录，该用户是否反复投放相同或变体推广内容？",
-        "criteria": {"true": "多条已提供的本群记录显示该用户重复投放推广内容。", "false": "已提供的近期记录体现正常连续讨论、补充说明或不同主题的交流。"}
-      }
-    },
-    "benign": {
-      "requested_response": {
-        "type": "noul",
-        "instructions": "这条推荐或链接是否直接回应了其他成员明确提出的相关需求？",
-        "criteria": {"true": "上下文有明确需求，本条内容提供相关回应。", "false": "当前发言属于主动投放推广，或与提供的需求无关。"}
-      },
-      "warning": {
-        "type": "noul",
-        "instructions": "当前作者是否在提醒、举报、分析或批评其中的广告与诈骗内容？",
-        "criteria": {"true": "作者的立场是风险提醒、举报、分析或批评。", "false": "作者实际在招揽、支持或推广这些内容。"}
-      }
-    },
-    "decision": {
+    "profile": {
       "promotion": {
         "type": "noul",
-        "instructions": "结合可用资料与上下文，当前发言是否构成本群禁止的广告或引流？",
-        "criteria": {"true": "当前作者的广告或引流行为符合已提供的本群禁止项，消息、资料和上下文共同支持该判断。", "false": "本群规则允许这类发布，或发言属于普通交流、回应需求、风险提醒等允许的场景。"}
+        "instructions": "在 JSON 顶层 .sender 的 name、username、bio、description 字段里，是否在宣传或招揽？",
+        "criteria": {"true": ".sender 的上述字段中有宣传或招揽内容。", "false": ".sender 的上述字段中没有宣传和招揽，空值视为没有文本。"}
       },
-      "fraud": {
+      "money": {
         "type": "noul",
-        "instructions": "当前发言是否包含有具体证据支持的诈骗、钓鱼或资产窃取诱导？",
-        "criteria": {"true": "当前作者以冒充身份、虚假承诺、凭据索取或资产转移等手段诱骗他人，材料中存在对应的具体证据。", "false": "作者在正常交流、提醒风险、举报或分析诈骗案例。"}
+        "instructions": "在 JSON 顶层 .sender 的 name、username、bio、description 字段里，是否有金钱相关内容？",
+        "criteria": {"true": ".sender 的上述字段中有金钱相关内容。", "false": ".sender 的上述字段中没有金钱相关内容，空值视为没有文本。"}
       },
-      "illicit": {
+      "earnings": {
         "type": "noul",
-        "instructions": "当前发言是否在招揽或促成本群禁止的黑灰产业务？",
-        "criteria": {"true": "作者在推广、招募、报价或促成已提供群规所禁止的黑灰产业务，例如诈骗、赌博、洗钱、盗号或交易被盗资料。", "false": "作者在正常讨论、求助、举报、研究或风险提醒。"}
+        "instructions": "在 JSON 顶层 .sender 的 name、username、bio、description 字段里，是否承诺读者能够赚钱？",
+        "criteria": {"true": ".sender 的上述字段中有让读者赚钱的承诺。", "false": ".sender 的上述字段中没有赚钱承诺，空值视为没有文本。"}
       },
-      "violation": {
+      "sexual": {
         "type": "noul",
-        "instructions": "依据本群规则及其例外，现有证据是否足以将当前消息判为应处理的违规消息？",
-        "criteria": {"true": "现有证据满足已提供群规的违规判定条件，并支持对当前消息采取处置。", "false": "消息符合群规允许范围或明确例外，例如正常讨论、求助、引用、举报和风险提醒。"}
+        "instructions": "在 JSON 顶层 .sender 的 name、username、bio、description 字段里，是否有色情相关内容？",
+        "criteria": {"true": ".sender 的上述字段中有色情相关内容。", "false": ".sender 的上述字段中没有色情相关内容，空值视为没有文本。"}
       }
     }
   },
@@ -132,43 +54,25 @@
     "min_confidence": 0.75,
     "on_low_confidence": "abstain_question",
     "questions": [
-      "profile.promotion", "message.promotion", "entry.profile_funnel",
-      "crosslink.profile_destination", "benign.warning", "benign.requested_response",
-      "decision.fraud", "decision.illicit", "decision.violation"
+      "content.promotion", "content.money", "content.earnings", "content.sexual",
+      "profile.promotion", "profile.money", "profile.earnings", "profile.sexual"
     ],
     "scoring": {
       "initial": 0,
       "rules": [
-        {"name": "资料推广", "when": "p.profile.promotion >= 0.85", "add": 20},
-        {"name": "消息推广", "when": "p.message.promotion >= 0.80", "add": 50},
-        {"name": "资料引流", "when": "p.crosslink.profile_destination >= 0.85 && p.entry.profile_funnel >= 0.85", "add": 30},
-        {"name": "诈骗诱导", "when": "p.decision.fraud >= 0.90", "add": 80},
-        {"name": "黑灰产业务", "when": "p.decision.illicit >= 0.90", "add": 80},
-        {"name": "风险提醒", "when": "p.benign.warning >= 0.90", "add": -50},
-        {"name": "回应需求", "when": "p.benign.requested_response >= 0.90", "add": -30}
+        {"name": "消息宣传金钱或色情", "when": "p.content.promotion >= 0.85 && (p.content.money >= 0.85 || p.content.sexual >= 0.85)", "add": 100},
+        {"name": "资料宣传金钱或色情", "when": "p.profile.promotion >= 0.85 && (p.profile.money >= 0.85 || p.profile.sexual >= 0.85)", "add": 100}
       ]
     },
-    "condition": "score >= 60 || p.decision.fraud >= 0.98",
+    "condition": "score >= 100",
     "rules": {
       "delete": {"enabled": true, "count": 1, "window_seconds": 0, "action": "delete", "duration_seconds": 0},
-      "repeat": {"enabled": true, "count": 3, "window_seconds": 600, "action": "mute", "duration_seconds": 600}
+      "repeat": {"enabled": false, "count": 3, "window_seconds": 600, "action": "mute", "duration_seconds": 600}
     }
   },
   "groups": {
     "-1001234567890": {
-      "min_confidence": 0.85,
-      "condition": "score >= 75 || p.decision.fraud >= 0.98",
-      "rules": {"repeat": {"duration_seconds": 120}}
-    },
-    "-1009876543210": {
-      "questions": ["message.promotion", "decision.fraud", "benign.warning"],
-      "scoring": {
-        "rules": [
-          {"name": "消息推广", "when": "p.message.promotion > 0.90", "add": 60},
-          {"name": "风险提醒", "when": "p.benign.warning > 0.90", "add": -50}
-        ]
-      },
-      "condition": "score >= 60 || p.decision.fraud >= 0.98"
+      "queue_limit": 50
     }
   }
 }
