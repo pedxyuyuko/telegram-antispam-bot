@@ -126,7 +126,16 @@ func (a *App) ProcessInbox(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	diagnostic = diagnostic.With("revision", archived.ID)
-	debug(diagnostic, "message.archived", "status", archived.Status, "skip_reason", skipReason, "duplicate", archived.Duplicate, "mode", policy.Mode, "question_count", len(questions), "queue_limit", policy.QueueLimit)
+	debug(diagnostic, "message.archived", "status", archived.Status, "skip_reason", archived.SkipReason, "duplicate", archived.Duplicate, "mode", policy.Mode, "question_count", len(questions), "queue_limit", policy.QueueLimit)
+	if archived.BlacklistBotID > 0 {
+		debug(diagnostic, "blacklist.matched", "bot_id", archived.BlacklistBotID, "generation", archived.BlacklistGeneration)
+	}
+	for _, action := range archived.Actions {
+		debug(diagnostic, "action.planned", "action_id", action.ID, "action", action.Kind, "rule", action.RuleID, "status", action.Status, "source", "bot_blacklist")
+	}
+	if link := archived.LinkedDelete; link != nil {
+		debug(diagnostic, "invocation.planned", "target_message", link.MessageID, "target_revision", link.RevisionID, "action_id", link.ActionID, "source_action", link.SourceActionID)
+	}
 	if archived.Evicted > 0 {
 		debug(diagnostic, "queue.evicted", "evicted", archived.Evicted, "queue_limit", policy.QueueLimit, "reason", "new_message")
 	}

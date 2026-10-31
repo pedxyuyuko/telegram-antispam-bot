@@ -31,6 +31,22 @@ func (a *App) ProcessModel(ctx context.Context, now time.Time) (bool, error) {
 		debug(diagnostic, "model.skipped", "reason", reason, "archived_as_ignored", marked)
 		return true, nil
 	}
+	if m.BotSenderID() > 0 {
+		blocked, err := a.Store.ApplyBotBlacklist(ctx, *j)
+		if err != nil {
+			return false, err
+		}
+		if blocked.Handled {
+			debug(diagnostic, "model.skipped", "reason", "bot_blacklist", "bot_id", blocked.BotID, "generation", blocked.Generation)
+			for _, action := range blocked.Actions {
+				debug(diagnostic, "action.planned", "action_id", action.ID, "action", action.Kind, "rule", action.RuleID, "status", action.Status, "source", "bot_blacklist")
+			}
+			if link := blocked.LinkedDelete; link != nil {
+				debug(diagnostic, "invocation.planned", "target_message", link.MessageID, "target_revision", link.RevisionID, "action_id", link.ActionID, "source_action", link.SourceActionID)
+			}
+			return true, nil
+		}
+	}
 	reused := len(j.State) > 0
 	var inferenceErr error
 	if !reused {
@@ -74,6 +90,9 @@ func (a *App) ProcessModel(ctx context.Context, now time.Time) (bool, error) {
 		for _, action := range report.Actions {
 			debug(diagnostic, "action.planned", "action_id", action.ID, "action", action.Kind, "rule", action.RuleID, "status", action.Status, "until", action.Until, "mode", j.Snapshot.Policy.Mode)
 		}
+		if link := report.LinkedDelete; link != nil {
+			debug(diagnostic, "invocation.planned", "target_message", link.MessageID, "target_revision", link.RevisionID, "action_id", link.ActionID, "source_action", link.SourceActionID)
+		}
 	}
 	return true, nil
 }
@@ -90,12 +109,18 @@ func (a *App) ProcessAction(ctx context.Context) (bool, error) {
 	finish := func() (bool, error) {
 		persist, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		err := a.Store.FinishAction(persist, intent.ID, status, detail)
+		effects, err := a.Store.CompleteAction(persist, intent.ID, status, detail)
 		if err != nil {
 			diagnostic.Error("save moderation outcome failed", "event", "action.persist_failed", "error", err)
 			return true, err
 		}
-		diagnostic.Info("moderation outcome", "event", "action.completed", "status", status, "detail", detail, "duration_ms", time.Since(started).Milliseconds())
+		diagnostic.Info("moderation outcome", "event", "action.completed", "status", status, "detail", detail, "source", intent.EvidenceKind, "duration_ms", time.Since(started).Milliseconds())
+		if effects.AddedToBlacklist {
+			diagnostic.Info("bot added to global blacklist", "event", "blacklist.added", "bot_id", effects.BotID, "source_action", intent.ID)
+		}
+		if link := effects.LinkedDelete; link != nil {
+			debug(diagnostic, "invocation.planned", "target_message", link.MessageID, "target_revision", link.RevisionID, "action_id", link.ActionID, "source_action", link.SourceActionID)
+		}
 		return true, err
 	}
 	cfg := a.Config.Snapshot()
@@ -111,6 +136,12 @@ func (a *App) ProcessAction(ctx context.Context) (bool, error) {
 	}
 	if !current {
 		detail = "message has a newer version"
+		return finish()
+	}
+	if valid, reason, err := a.Store.BotActionCurrent(ctx, *intent); err != nil {
+		return false, err
+	} else if !valid {
+		detail = reason
 		return finish()
 	}
 	job, err := a.Store.Revision(ctx, intent.RevisionID)

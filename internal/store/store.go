@@ -48,15 +48,17 @@ type Job struct {
 	Status     string
 }
 type Action struct {
-	ID         int64
-	RevisionID int64
-	ChatID     int64
-	MessageID  int
-	UserID     int64
-	RuleID     string
-	Rule       config.Rule
-	Kind       string
-	Until      int64
+	EvidenceKind                                      string
+	EvidenceBotID, EvidenceGeneration, SourceActionID int64
+	ID                                                int64
+	RevisionID                                        int64
+	ChatID                                            int64
+	MessageID                                         int
+	UserID                                            int64
+	RuleID                                            string
+	Rule                                              config.Rule
+	Kind                                              string
+	Until                                             int64
 }
 
 const schema = `

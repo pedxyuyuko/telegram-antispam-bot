@@ -199,6 +199,12 @@ func (s *Store) finish(ctx context.Context, j Job, result decision.Result, infer
 				return err
 			}
 			report.Actions = append(report.Actions, PlannedAction{ID: id, RuleID: c.id, Kind: kind, Status: actionStatus, Until: until})
+			if kind == "delete" && actionStatus == "recorded" {
+				report.LinkedDelete, err = rememberInvocationTx(ctx, tx, id, j)
+				if err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return tx.Commit()
@@ -212,9 +218,9 @@ func (s *Store) TakeAction(ctx context.Context) (*Action, error) {
 	defer tx.Rollback()
 	var a Action
 	var raw []byte
-	err = tx.QueryRowContext(ctx, `SELECT a.id,a.revision_id,a.chat_id,a.message_id,a.user_id,a.rule_id,a.rule,a.kind,a.until_date FROM actions a
+	err = tx.QueryRowContext(ctx, `SELECT a.id,a.revision_id,a.chat_id,a.message_id,a.user_id,a.rule_id,a.rule,a.kind,a.until_date,coalesce(e.kind,''),coalesce(e.bot_id,0),coalesce(e.generation,0),coalesce(e.source_action_id,0) FROM actions a LEFT JOIN action_evidence e ON e.action_id=a.id
  WHERE a.status='pending' AND NOT EXISTS (SELECT 1 FROM actions b WHERE b.chat_id=a.chat_id AND b.message_id=a.message_id AND b.kind=a.kind AND b.status='executing')
- ORDER BY a.id LIMIT 1`).Scan(&a.ID, &a.RevisionID, &a.ChatID, &a.MessageID, &a.UserID, &a.RuleID, &raw, &a.Kind, &a.Until)
+ ORDER BY a.id LIMIT 1`).Scan(&a.ID, &a.RevisionID, &a.ChatID, &a.MessageID, &a.UserID, &a.RuleID, &raw, &a.Kind, &a.Until, &a.EvidenceKind, &a.EvidenceBotID, &a.EvidenceGeneration, &a.SourceActionID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -248,9 +254,6 @@ func (s *Store) ActionCurrent(ctx context.Context, a Action) (bool, error) {
 	return id == a.RevisionID, err
 }
 func (s *Store) FinishAction(ctx context.Context, id int64, status, detail string) error {
-	if status != "succeeded" && status != "failed" && status != "skipped" {
-		return errors.New("invalid action outcome")
-	}
-	_, err := s.db.ExecContext(ctx, `UPDATE actions SET status=?,detail=? WHERE id=? AND status='executing'`, status, detail, id)
+	_, err := s.CompleteAction(ctx, id, status, detail)
 	return err
 }

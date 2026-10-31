@@ -50,6 +50,30 @@ func (s *Store) AddRevision(ctx context.Context, in Inbox, m *telegram.Message, 
 	if err != nil {
 		return ArchiveReport{}, err
 	}
+	report := ArchiveReport{ID: id, Status: status, SkipReason: snapshot.SkipReason}
+	job := Job{ID: id, UpdateID: in.ID, ChatID: m.Chat.ID, MessageID: m.ID, UserID: m.UserID(), Sender: m.SenderKey(), ReceivedAt: in.ReceivedAt, Raw: m.Bytes(), Snapshot: snapshot, Status: status}
+	if status == "pending" {
+		blocked, err := applyBlacklistTx(ctx, tx, job, m)
+		if err != nil {
+			return ArchiveReport{}, err
+		}
+		if blocked.Handled {
+			report.Status = blocked.Status
+			report.SkipReason = "bot_blacklist"
+			report.BlacklistBotID = blocked.BotID
+			report.BlacklistGeneration = blocked.Generation
+			report.Actions = blocked.Actions
+			report.LinkedDelete = blocked.LinkedDelete
+			job.Status = blocked.Status
+		}
+	}
+	linked, err := resolveInvocationsTx(ctx, tx, job)
+	if err != nil {
+		return ArchiveReport{}, err
+	}
+	if linked != nil {
+		report.LinkedDelete = linked
+	}
 	evicted, err := trim(ctx, tx, m.Chat.ID, snapshot.Policy.QueueLimit)
 	if err != nil {
 		return ArchiveReport{}, err
@@ -57,7 +81,8 @@ func (s *Store) AddRevision(ctx context.Context, in Inbox, m *telegram.Message, 
 	if err := tx.Commit(); err != nil {
 		return ArchiveReport{}, err
 	}
-	return ArchiveReport{ID: id, Status: status, Evicted: evicted}, nil
+	report.Evicted = evicted
+	return report, nil
 }
 
 func (s *Store) Resize(ctx context.Context, cfg config.Config) ([]QueueChange, error) {

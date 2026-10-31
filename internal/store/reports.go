@@ -5,10 +5,14 @@ import "telegram-antispam-bot/internal/decision"
 // Reports describe committed outcomes for diagnostics. They never carry message
 // bodies, profile text, credentials, or the raw model response.
 type ArchiveReport struct {
-	ID        int64
-	Status    string
-	Duplicate bool
-	Evicted   int64
+	SkipReason                          string
+	BlacklistBotID, BlacklistGeneration int64
+	Actions                             []PlannedAction
+	LinkedDelete                        *LinkedDelete
+	ID                                  int64
+	Status                              string
+	Duplicate                           bool
+	Evicted                             int64
 }
 
 type QueueChange struct {
@@ -38,11 +42,12 @@ type PlannedAction struct {
 }
 
 type FinishReport struct {
-	AttemptID  int64
-	Status     string
-	Reason     string
-	RetryAt    int64
-	Evaluation *decision.Evaluation
-	Rules      []RuleReport
-	Actions    []PlannedAction
+	LinkedDelete *LinkedDelete
+	AttemptID    int64
+	Status       string
+	Reason       string
+	RetryAt      int64
+	Evaluation   *decision.Evaluation
+	Rules        []RuleReport
+	Actions      []PlannedAction
 }
