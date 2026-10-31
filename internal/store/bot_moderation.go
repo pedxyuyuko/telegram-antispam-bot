@@ -153,7 +153,7 @@ func (s *Store) ApplyBotBlacklist(ctx context.Context, j Job) (BlacklistReport, 
 }
 
 func invocationTargetEligible(j Job, m *telegram.Message) bool {
-	return (j.Status == "pending" || j.Status == "running" || j.Status == "succeeded") && m.IsGroup() && m.From != nil && !m.From.IsBot && m.UserID() > 0 && m.SenderChat == nil && !m.IsAutomaticForward
+	return (j.Status == "pending" || j.Status == "running" || j.Status == "succeeded" || j.Status == "evicted") && m.IsGroup() && m.From != nil && !m.From.IsBot && m.UserID() > 0 && m.SenderChat == nil && !m.IsAutomaticForward
 }
 
 func resolveInvocationsTx(ctx context.Context, tx *sql.Tx, j Job) (*LinkedDelete, error) {

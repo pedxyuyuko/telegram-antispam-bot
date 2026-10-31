@@ -412,3 +412,30 @@ func TestBlacklistGenerationCancelsWorkFromEarlierMembership(t *testing.T) {
 		t.Fatal("stale action outcome lost")
 	}
 }
+
+func TestBlacklistReplyCanCleanUpAnEvictedInvocation(t *testing.T) {
+	a, path, probe := botFixture(t, "member", "enforce")
+	if err := a.Config.Set(nil, "queue_limit", json.RawMessage(`1`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Store.SetBotBlocked(context.Background(), store.BotIdentity{ID: 200}, true, 9, 9001); err != nil {
+		t.Fatal(err)
+	}
+	caller := message(50, "/start 1 @ad_bot")
+	deliver(t, a, 1, caller)
+	newer := message(51, "waiting for model")
+	newer.ID = 2
+	deliver(t, a, 2, newer)
+	if scalar(t, path, `SELECT count(*) FROM revisions WHERE message_id=1 AND status='evicted'`) != 1 {
+		t.Fatal("fixture did not evict caller")
+	}
+	deliver(t, a, 3, guestReply(caller, 3, 200))
+	doAction(t, a)
+	doAction(t, a)
+	if got := probe.deletes(); len(got) != 2 || got[0] != 3 || got[1] != 1 {
+		t.Fatalf("known guest bot left evicted invocation visible: %v", got)
+	}
+	if probe.calls.Load() != 0 || scalar(t, path, `SELECT count(*) FROM revisions WHERE message_id=1 AND status='evicted'`) != 1 {
+		t.Fatal("caller was reinserted into model work")
+	}
+}
