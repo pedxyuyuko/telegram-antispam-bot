@@ -39,6 +39,7 @@ type Message struct {
 	Entities           []Entity        `json:"entities,omitempty"`
 	CaptionEntities    []Entity        `json:"caption_entities,omitempty"`
 	Reply              *Message        `json:"reply_to_message,omitempty"`
+	GuestBotCallerUser *User           `json:"guest_bot_caller_user,omitempty"`
 	Raw                json.RawMessage `json:"-"`
 }
 
