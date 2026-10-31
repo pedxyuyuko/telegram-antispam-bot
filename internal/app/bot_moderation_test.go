@@ -439,3 +439,129 @@ func TestBlacklistReplyCanCleanUpAnEvictedInvocation(t *testing.T) {
 		t.Fatal("caller was reinserted into model work")
 	}
 }
+
+func TestLateInvocationUsesConfirmedEnforceEvidenceAfterRecordedEvidence(t *testing.T) {
+	a, path, probe := botFixture(t, "member", "record")
+	caller := message(50, "/start 1 @first_bot @second_bot")
+	deliver(t, a, 1, guestReply(caller, 2, 200))
+	runModel(t, a, time.Now())
+	if err := a.Config.Set(nil, "mode", json.RawMessage(`"enforce"`)); err != nil {
+		t.Fatal(err)
+	}
+	deliver(t, a, 2, guestReply(caller, 3, 201))
+	runModel(t, a, time.Now())
+	doAction(t, a)
+	deliver(t, a, 3, caller)
+	doAction(t, a)
+	if got := probe.deletes(); len(got) != 2 || got[0] != 3 || got[1] != 1 {
+		t.Fatalf("confirmed evidence did not enable caller cleanup: %v", got)
+	}
+	if scalar(t, path, `SELECT count(*) FROM actions WHERE message_id=1 AND mode='enforce' AND status='succeeded'`) != 1 {
+		t.Fatal("caller action kept stale recorded mode")
+	}
+	if scalar(t, path, `SELECT count(*) FROM bot_action_events e JOIN actions a ON a.id=e.action_id WHERE a.message_id=1 AND e.event='before_upgrade' AND e.mode='record' AND e.status='recorded'`) != 1 {
+		t.Fatal("original recorded intent was not preserved in audit")
+	}
+}
+
+func TestInvocationCanUseAnyStillValidConfirmedSource(t *testing.T) {
+	for _, removed := range []int64{200, 201} {
+		t.Run(strconv.FormatInt(removed, 10), func(t *testing.T) {
+			a, path, probe := botFixture(t, "member", "enforce")
+			ctx := context.Background()
+			for i, id := range []int64{200, 201} {
+				if _, err := a.Store.SetBotBlocked(ctx, store.BotIdentity{ID: id}, true, 9, int64(9001+i)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			caller := message(50, "/start 1 @first_bot @second_bot")
+			deliver(t, a, 1, caller)
+			runModel(t, a, time.Now())
+			deliver(t, a, 2, guestReply(caller, 2, 200))
+			deliver(t, a, 3, guestReply(caller, 3, 201))
+			doAction(t, a)
+			doAction(t, a)
+			if _, err := a.Store.SetBotBlocked(ctx, store.BotIdentity{ID: removed}, false, 9, 9003); err != nil {
+				t.Fatal(err)
+			}
+			doAction(t, a)
+			if got := probe.deletes(); len(got) != 3 || got[2] != 1 {
+				t.Fatalf("valid source was pinned behind removed source: %v", got)
+			}
+			if scalar(t, path, `SELECT count(*) FROM action_evidence e JOIN actions a ON a.id=e.action_id WHERE a.message_id=1 AND e.bot_id=`+strconv.FormatInt(401-removed, 10)) != 1 {
+				t.Fatal("selected valid source was not audited")
+			}
+			if scalar(t, path, `SELECT count(*) FROM bot_action_events e JOIN actions a ON a.id=e.action_id WHERE a.message_id=1 AND e.event='outcome' AND e.status='succeeded'`) != 1 {
+				t.Fatal("linked deletion outcome audit missing")
+			}
+		})
+	}
+}
+
+func TestUnbanDuringMembershipLookupCancelsUndispatchedBotWork(t *testing.T) {
+	for _, linked := range []bool{false, true} {
+		t.Run(strconv.FormatBool(linked), func(t *testing.T) {
+			var block atomic.Bool
+			var deletes atomic.Int32
+			entered := make(chan struct{}, 1)
+			release := make(chan struct{})
+			var once sync.Once
+			t.Cleanup(func() { once.Do(func() { close(release) }) })
+			a, path := appFixture(t, "member", func(r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "deleteMessage") {
+					deletes.Add(1)
+				}
+				if strings.HasSuffix(r.URL.Path, "getChatMember") && block.Load() {
+					select {
+					case entered <- struct{}{}:
+					default:
+					}
+					select {
+					case <-release:
+					case <-r.Context().Done():
+					}
+				}
+			})
+			if err := a.Config.Set(nil, "mode", json.RawMessage(`"enforce"`)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := a.Store.SetBotBlocked(context.Background(), store.BotIdentity{ID: 200}, true, 9, 9001); err != nil {
+				t.Fatal(err)
+			}
+			if linked {
+				caller := message(50, "/start 1 @ad_bot")
+				deliver(t, a, 1, caller)
+				deliver(t, a, 2, guestReply(caller, 2, 200))
+				doAction(t, a)
+			} else {
+				bot := message(200, "known bot")
+				bot.From.IsBot = true
+				deliver(t, a, 1, bot)
+			}
+			before := deletes.Load()
+			block.Store(true)
+			done := make(chan error, 1)
+			go func() { _, err := a.ProcessAction(context.Background()); done <- err }()
+			select {
+			case <-entered:
+			case <-time.After(3 * time.Second):
+				t.Fatal("membership query did not start")
+			}
+			if _, err := a.Store.SetBotBlocked(context.Background(), store.BotIdentity{ID: 200}, false, 9, 9002); err != nil {
+				t.Fatal(err)
+			}
+			once.Do(func() { close(release) })
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("action did not finish")
+			}
+			if deletes.Load() != before || scalar(t, path, `SELECT count(*) FROM actions WHERE status='skipped'`) != 1 {
+				t.Fatal("removed generation dispatched after membership lookup")
+			}
+		})
+	}
+}

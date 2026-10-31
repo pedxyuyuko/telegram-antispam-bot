@@ -62,3 +62,19 @@ func TestInvocationFingerprintTracksEditsAndIgnoresNestedReply(t *testing.T) {
 		t.Fatal("edit version not covered by invocation identity")
 	}
 }
+
+func TestInvocationFingerprintUsesStableMentionedUserIdentity(t *testing.T) {
+	m := invocationMessage(t).Reply
+	m.Entities = []Entity{{Type: "text_mention", Offset: 0, Length: 3, User: &User{ID: 77, FirstName: "Old", LastName: "Name", Username: "old_name"}}}
+	fingerprint := m.InvocationFingerprint()
+	m.Entities[0].User.FirstName = "New"
+	m.Entities[0].User.LastName = "Display"
+	m.Entities[0].User.Username = "new_name"
+	if m.InvocationFingerprint() != fingerprint {
+		t.Fatal("mutable mentioned-user details changed invocation identity")
+	}
+	m.Entities[0].User.ID = 78
+	if m.InvocationFingerprint() == fingerprint {
+		t.Fatal("different mentioned user kept same invocation identity")
+	}
+}

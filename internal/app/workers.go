@@ -194,6 +194,44 @@ func (a *App) ProcessAction(ctx context.Context) (bool, error) {
 			return finish()
 		}
 	}
+	// Membership checks can wait on the network. Revalidate local authority and
+	// evidence immediately before dispatch, after that wait has completed.
+	fresh := a.Config.Snapshot()
+	freshPolicy := fresh.ForGroup(intent.ChatID)
+	freshRule, exists := freshPolicy.Rules[intent.RuleID]
+	if freshPolicy.Mode != "enforce" || !exists || !freshRule.Enabled || freshRule != intent.Rule {
+		detail = "current policy differs from planned punishment"
+		return finish()
+	}
+	freshQuestions, err := fresh.SelectedQuestions(freshPolicy)
+	if err != nil {
+		return false, err
+	}
+	if decision.PolicyKey(job.Snapshot.Policy, job.Snapshot.Questions, intent.Rule) != decision.PolicyKey(freshPolicy, freshQuestions, freshRule) {
+		detail = "decision policy or question definitions changed"
+		return finish()
+	}
+	if fresh.IsOwner(intent.UserID) {
+		detail = "bot owner is protected"
+		return finish()
+	}
+	current, err = a.Store.ActionCurrent(ctx, *intent)
+	if err != nil {
+		return false, err
+	}
+	if !current {
+		detail = "message has a newer version"
+		return finish()
+	}
+	release, valid, reason, err := a.Store.GuardBotAction(ctx, *intent)
+	if err != nil {
+		return false, err
+	}
+	if !valid {
+		detail = reason
+		return finish()
+	}
+	defer release()
 	switch intent.Kind {
 	case "delete":
 		debug(diagnostic, "action.dispatching")

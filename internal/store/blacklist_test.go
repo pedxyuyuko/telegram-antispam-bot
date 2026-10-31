@@ -22,7 +22,7 @@ func TestBlacklistMigrationCreatesAuditableGlobalState(t *testing.T) {
 	if version != 3 {
 		t.Fatalf("blacklist schema version=%d want 3", version)
 	}
-	for _, name := range []string{"bot_blacklist", "bot_blacklist_events", "blacklist_matches", "action_evidence", "bot_invocations"} {
+	for _, name := range []string{"bot_blacklist", "bot_blacklist_events", "blacklist_matches", "action_evidence", "bot_action_events", "bot_invocations"} {
 		var n int
 		if err := s.db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&n); err != nil || n != 1 {
 			t.Fatalf("missing %s: %v", name, err)
@@ -151,7 +151,7 @@ func TestVersionTwoBootstrapUsesOnlySuccessfulBotDeletions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = old.Exec(`DROP TABLE bot_invocations; DROP TABLE action_evidence; DROP TABLE blacklist_matches; DROP TABLE bot_blacklist_events; DROP TABLE bot_blacklist; DELETE FROM meta WHERE key='bot_blacklist_initialized'; PRAGMA user_version=2;`)
+	_, err = old.Exec(`DROP TABLE bot_invocations; DROP TABLE bot_action_events; DROP TABLE action_evidence; DROP TABLE blacklist_matches; DROP TABLE bot_blacklist_events; DROP TABLE bot_blacklist; DELETE FROM meta WHERE key='bot_blacklist_initialized'; PRAGMA user_version=2;`)
 	old.Close()
 	if err != nil {
 		t.Fatal(err)

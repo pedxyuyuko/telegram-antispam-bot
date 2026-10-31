@@ -26,6 +26,10 @@ CREATE TABLE IF NOT EXISTS blacklist_matches(
 CREATE TABLE IF NOT EXISTS action_evidence(
  action_id INTEGER PRIMARY KEY REFERENCES actions(id),kind TEXT NOT NULL CHECK(kind IN ('bot_blacklist','bot_invocation')),
  bot_id INTEGER NOT NULL,generation INTEGER NOT NULL DEFAULT 0,source_action_id INTEGER REFERENCES actions(id));
+CREATE TABLE IF NOT EXISTS bot_action_events(
+ id INTEGER PRIMARY KEY,action_id INTEGER NOT NULL REFERENCES actions(id),event TEXT NOT NULL,
+ source_action_id INTEGER REFERENCES actions(id),mode TEXT NOT NULL,status TEXT NOT NULL,
+ rule_id TEXT NOT NULL,rule TEXT NOT NULL,evidence_kind TEXT NOT NULL,detail TEXT NOT NULL DEFAULT '',created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS bot_invocations(
  source_action_id INTEGER PRIMARY KEY REFERENCES actions(id),bot_id INTEGER NOT NULL,chat_id INTEGER NOT NULL,message_id INTEGER NOT NULL,
  user_id INTEGER NOT NULL,fingerprint TEXT NOT NULL,target_action_id INTEGER REFERENCES actions(id),created_at INTEGER NOT NULL);
@@ -137,6 +141,8 @@ func (s *Store) SetBotBlocked(ctx context.Context, bot BotIdentity, blocked bool
 	if bot.ID <= 0 || actor <= 0 || update <= 0 {
 		return BlacklistChange{}, errors.New("positive bot, actor and update IDs are required")
 	}
+	s.botDispatchMu.Lock()
+	defer s.botDispatchMu.Unlock()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return BlacklistChange{}, err

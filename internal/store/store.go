@@ -19,10 +19,11 @@ import (
 )
 
 type Store struct {
-	db      *sql.DB
-	lock    *os.File
-	closeMu sync.Mutex
-	closed  bool
+	botDispatchMu sync.RWMutex
+	db            *sql.DB
+	lock          *os.File
+	closeMu       sync.Mutex
+	closed        bool
 }
 type Inbox struct {
 	ID         int64
