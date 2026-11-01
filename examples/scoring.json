@@ -60,7 +60,7 @@
     "scoring": {
       "initial": 0,
       "rules": [
-        {"name": "消息宣传金钱或色情", "when": "p.content.promotion >= 0.85 && (p.content.money >= 0.85 || p.content.sexual >= 0.85)", "add": 100},
+        {"name": "消息宣传金钱或色情", "when": "p.content.promotion >= 0.83 && (p.content.money >= 0.85 || p.content.sexual >= 0.85)", "add": 100},
         {"name": "资料宣传金钱或色情", "when": "p.profile.promotion >= 0.85 && (p.profile.money >= 0.85 || p.profile.sexual >= 0.85)", "add": 100}
       ]
     },

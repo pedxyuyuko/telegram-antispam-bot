@@ -104,7 +104,7 @@ func TestExampleProvidesGroupedScoringOutsideRepository(t *testing.T) {
 	for id := range questions {
 		p[id] = .01
 	}
-	p["content.promotion"], p["content.money"] = .85, .85
+	p["content.promotion"], p["content.money"] = .83, .85
 	e, err := decision.EvaluatePolicy(questions, c.Base, decision.Result{Probabilities: p})
 	if err != nil || e.Score != 100 || e.Condition != expression.True {
 		t.Fatalf("generated example lost custom scoring: %+v %v", e, err)
@@ -136,11 +136,14 @@ func TestGroupedExampleValidatesAndScoresRepresentativeMessages(t *testing.T) {
 	}{
 		{"money_without_promotion", map[string]float64{"content.money": .99}, 0},
 		{"promotion_without_topic", map[string]float64{"content.promotion": .99}, 0},
-		{"message_money_boundary", map[string]float64{"content.promotion": .85, "content.money": .85}, 100},
-		{"message_sexual_boundary", map[string]float64{"content.promotion": .85, "content.sexual": .85}, 100},
+		{"message_money_boundary", map[string]float64{"content.promotion": .83, "content.money": .85}, 100},
+		{"message_sexual_boundary", map[string]float64{"content.promotion": .83, "content.sexual": .85}, 100},
 		{"profile_money_boundary", map[string]float64{"profile.promotion": .85, "profile.money": .85}, 100},
 		{"profile_sexual_boundary", map[string]float64{"profile.promotion": .85, "profile.sexual": .85}, 100},
-		{"promotion_below_boundary", map[string]float64{"content.promotion": .84999, "content.money": .99}, 0},
+		{"promotion_below_boundary", map[string]float64{"content.promotion": .82999, "content.money": .99}, 0},
+		{"normal_discussion_6810", map[string]float64{"content.promotion": .81914, "content.money": .98833}, 0},
+		{"wealth_ad_6819", map[string]float64{"content.promotion": .845790684223175, "content.money": .8896596431732178}, 100},
+		{"wealth_ad_6823", map[string]float64{"content.promotion": .8409253358840942, "content.money": .8899038434028625}, 100},
 		{"topic_below_boundary", map[string]float64{"content.promotion": .99, "content.money": .84999, "content.sexual": .84999}, 0},
 		{"sources_are_independent", map[string]float64{"content.promotion": .99, "profile.money": .99}, 0},
 		{"two_topics_one_source", map[string]float64{"content.promotion": .99, "content.money": .99, "content.sexual": .99}, 100},
