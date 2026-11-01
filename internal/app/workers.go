@@ -189,7 +189,8 @@ func (a *App) ProcessAction(ctx context.Context) (bool, error) {
 			return finish()
 		}
 		debug(diagnostic, "action.membership", "membership", member)
-		if intent.Kind != "delete" && member != "member" && member != "restricted" {
+		banDeparted := intent.Kind == "ban" && member == "left"
+		if intent.Kind != "delete" && member != "member" && member != "restricted" && !banDeparted {
 			detail = "target is no longer an active member; preserve existing membership state"
 			return finish()
 		}

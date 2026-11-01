@@ -2,12 +2,14 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,6 +20,98 @@ type banCall struct{ user, chat, until int64 }
 type banProbe struct {
 	mu    sync.Mutex
 	calls []banCall
+}
+
+func TestCallerBanProtectsExistingMembershipAndHandlesDepartedCallers(t *testing.T) {
+	for _, role := range []string{"member", "left", "restricted", "kicked", "administrator", "creator", ""} {
+		t.Run(role, func(t *testing.T) {
+			var membership atomic.Value
+			membership.Store("member")
+			probe := &banProbe{}
+			a, path := appFixtureWithMembership(t, func() string { return membership.Load().(string) }, probe.observe)
+			if err := a.Config.Set(nil, "mode", json.RawMessage(`"enforce"`)); err != nil {
+				t.Fatal(err)
+			}
+			enableBan(t, a, 3600)
+			if _, err := a.Store.SetBotBlocked(context.Background(), store.BotIdentity{ID: 200}, true, 9, 9001); err != nil {
+				t.Fatal(err)
+			}
+			caller := message(50, "@ad_bot")
+			deliver(t, a, 1, caller)
+			deliver(t, a, 2, guestReply(caller, 2, 200))
+			doAction(t, a)
+			membership.Store(role)
+			drainActions(t, a, path)
+			want := 0
+			if role == "member" || role == "left" || role == "restricted" {
+				want = 1
+			}
+			if len(probe.bans()) != want {
+				t.Fatalf("membership=%q bans=%v", role, probe.bans())
+			}
+		})
+	}
+}
+
+func TestCallerBanRechecksChangedPolicyEvidenceAndDeadline(t *testing.T) {
+	for _, scenario := range []string{"disabled", "record", "duration_changed", "edited", "blacklist_removed", "owner", "expired"} {
+		t.Run(scenario, func(t *testing.T) {
+			probe := &banProbe{}
+			a, path, _ := botFixture(t, "member", "enforce", probe.observe)
+			enableBan(t, a, 60)
+			if _, err := a.Store.SetBotBlocked(context.Background(), store.BotIdentity{ID: 200}, true, 9, 9001); err != nil {
+				t.Fatal(err)
+			}
+			caller := message(50, "@ad_bot")
+			deliver(t, a, 1, caller)
+			deliver(t, a, 2, guestReply(caller, 2, 200))
+			doAction(t, a)
+			if scalar(t, path, `SELECT count(*) FROM actions WHERE kind='ban' AND status='pending'`) != 1 {
+				t.Fatal("fixture missing planned ban")
+			}
+			switch scenario {
+			case "disabled":
+				if err := a.Config.Set(nil, "rules.ban.enabled", json.RawMessage(`false`)); err != nil {
+					t.Fatal(err)
+				}
+			case "record":
+				if err := a.Config.Set(nil, "mode", json.RawMessage(`"record"`)); err != nil {
+					t.Fatal(err)
+				}
+			case "duration_changed":
+				if err := a.Config.Set(nil, "rules.ban.duration_seconds", json.RawMessage(`-1`)); err != nil {
+					t.Fatal(err)
+				}
+			case "edited":
+				edited := *caller
+				edited.Text = "ordinary discussion"
+				edited.EditDate = caller.Date + 1
+				deliver(t, a, 3, &edited)
+			case "blacklist_removed":
+				if _, err := a.Store.SetBotBlocked(context.Background(), store.BotIdentity{ID: 200}, false, 9, 9002); err != nil {
+					t.Fatal(err)
+				}
+			case "owner":
+				c := a.Config.Snapshot()
+				c.OwnerIDs = append(c.OwnerIDs, 50)
+				saveScoringConfig(t, a, path, c)
+			case "expired":
+				db, err := sql.Open("sqlite", path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = db.Exec(`UPDATE actions SET until_date=? WHERE kind='ban'`, time.Now().Unix()-1)
+				db.Close()
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			drainActions(t, a, path)
+			if len(probe.bans()) != 0 || scalar(t, path, `SELECT count(*) FROM actions WHERE kind='ban' AND status='skipped'`) != 1 {
+				t.Fatal("changed authority or expired deadline dispatched ban")
+			}
+		})
+	}
 }
 
 func (p *banProbe) observe(r *http.Request) {
