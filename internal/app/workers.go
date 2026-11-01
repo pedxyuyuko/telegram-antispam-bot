@@ -241,6 +241,10 @@ func (a *App) ProcessAction(ctx context.Context) (bool, error) {
 		}
 		var until time.Time
 		if intent.Rule.DurationSeconds != -1 {
+			if message.Chat.Type != "supergroup" {
+				detail = "finite caller ban requires a supergroup"
+				return finish()
+			}
 			until = time.Unix(intent.Until, 0)
 			if time.Until(until) < 30*time.Second {
 				detail = "ban deadline has expired"

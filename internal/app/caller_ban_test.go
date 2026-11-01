@@ -497,3 +497,22 @@ func TestCallerBanSelectsLongestEnabledDuration(t *testing.T) {
 		})
 	}
 }
+
+func TestFiniteCallerBanSkipsBasicGroups(t *testing.T) {
+	probe := &banProbe{}
+	a, path, deletes := botFixture(t, "member", "enforce", probe.observe)
+	enableBan(t, a, 3600)
+	caller := message(50, "@ad_bot")
+	caller.Chat.Type = "group"
+	deliver(t, a, 1, caller)
+	runModel(t, a, time.Now())
+	deliver(t, a, 2, guestReply(caller, 2, 200))
+	runModel(t, a, time.Now())
+	drainActions(t, a, path)
+	if len(probe.bans()) != 0 || len(deletes.deletes()) != 2 {
+		t.Fatal("finite ban dispatched to a chat type that ignores until_date")
+	}
+	if scalar(t, path, `SELECT count(*) FROM actions WHERE kind='ban' AND status='skipped'`) != 1 {
+		t.Fatal("unsupported finite ban not audited")
+	}
+}
