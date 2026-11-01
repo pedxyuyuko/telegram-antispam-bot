@@ -67,7 +67,8 @@
     "condition": "score >= 100",
     "rules": {
       "delete": {"enabled": true, "count": 1, "window_seconds": 0, "action": "delete", "duration_seconds": 0},
-      "repeat": {"enabled": false, "count": 3, "window_seconds": 600, "action": "mute", "duration_seconds": 600}
+      "repeat": {"enabled": false, "count": 3, "window_seconds": 600, "action": "mute", "duration_seconds": 600},
+      "ban": {"enabled": false, "target": "caller", "count": 1, "action": "ban", "duration_seconds": -1}
     }
   },
   "groups": {

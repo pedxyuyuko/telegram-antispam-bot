@@ -182,7 +182,9 @@ const help = `群管理员命令：
 /as_set mode "record"
 /as_set queue_limit 100
 /as_set rules.repeat.duration_seconds 120
-/as_set rules.repeat.enabled false`
+/as_set rules.repeat.enabled false
+/as_set rules.ban.duration_seconds -1 — 调用者永久封禁；定时填写 60～31536000 秒
+/as_set rules.ban.enabled true — 开启调用者封禁，仅 enforce 模式执行`
 
 func (a *App) command(ctx context.Context, updateID int64, m *telegram.Message, name, args string) (string, error) {
 	diagnostic := a.diagnostics(m.Chat.ID, "message", m.ID, "update", updateID, "command", name, "actor", m.UserID())
