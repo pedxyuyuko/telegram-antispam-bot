@@ -43,6 +43,21 @@ func planBotActionTx(ctx context.Context, tx *sql.Tx, j Job, kind string, bot, g
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
+	if actionKind == "ban" {
+		sort.SliceStable(ids, func(i, k int) bool {
+			a, b := j.Snapshot.Policy.Rules[ids[i]].DurationSeconds, j.Snapshot.Policy.Rules[ids[k]].DurationSeconds
+			if a == b {
+				return false
+			}
+			if a == -1 {
+				return true
+			}
+			if b == -1 {
+				return false
+			}
+			return a > b
+		})
+	}
 	for _, id := range ids {
 		rule := j.Snapshot.Policy.Rules[id]
 		if !rule.Enabled || rule.Action != actionKind {

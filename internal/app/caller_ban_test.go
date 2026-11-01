@@ -466,3 +466,34 @@ func TestVersionFourMigrationPreservesInvocationHistoryWithoutNewActions(t *test
 		t.Fatal("restart duplicated migration links")
 	}
 }
+
+func TestCallerBanSelectsLongestEnabledDuration(t *testing.T) {
+	for _, duration := range []int{-1, 3600} {
+		t.Run(strconv.Itoa(duration), func(t *testing.T) {
+			probe := &banProbe{}
+			a, path, _ := botFixture(t, "member", "enforce", probe.observe)
+			enableBan(t, a, duration)
+			c := a.Config.Snapshot()
+			short := c.Base.Rules["ban"]
+			short.DurationSeconds = 60
+			c.Base.Rules["aaa_short"] = short
+			saveScoringConfig(t, a, path, c)
+			caller := message(50, "@ad_bot")
+			deliver(t, a, 1, caller)
+			runModel(t, a, time.Now())
+			deliver(t, a, 2, guestReply(caller, 2, 200))
+			runModel(t, a, time.Now())
+			drainActions(t, a, path)
+			calls := probe.bans()
+			if len(calls) != 1 {
+				t.Fatalf("bans=%v", calls)
+			}
+			if duration == -1 && calls[0].until != 0 {
+				t.Fatal("finite rule overrode permanent ban")
+			}
+			if duration > 0 && calls[0].until < time.Now().Unix()+3590 {
+				t.Fatal("shorter rule overrode longer ban")
+			}
+		})
+	}
+}
