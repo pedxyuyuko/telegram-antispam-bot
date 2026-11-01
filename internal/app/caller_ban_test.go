@@ -516,3 +516,60 @@ func TestFiniteCallerBanSkipsBasicGroups(t *testing.T) {
 		t.Fatal("unsupported finite ban not audited")
 	}
 }
+
+func TestShortBanEvidenceCannotAuthorizeAnExistingPermanentAction(t *testing.T) {
+	for _, injectLink := range []bool{false, true} {
+		t.Run(strconv.FormatBool(injectLink), func(t *testing.T) {
+			probe := &banProbe{}
+			a, path, _ := botFixture(t, "member", "enforce", probe.observe)
+			ctx := context.Background()
+			c := a.Config.Snapshot()
+			short := c.Base.Rules["ban"]
+			short.Enabled = true
+			short.DurationSeconds = 3600
+			c.Base.Rules["short"] = short
+			saveScoringConfig(t, a, path, c)
+			for i, id := range []int64{200, 201} {
+				if _, err := a.Store.SetBotBlocked(ctx, store.BotIdentity{ID: id}, true, 9, int64(9001+i)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			caller := message(50, "@first_bot @second_bot")
+			// The finite-only source is dispatched first and finishes after the
+			// permanent-capable source, as can happen with overlapping dispatches.
+			deliver(t, a, 1, guestReply(caller, 3, 201))
+			finiteSource, err := a.Store.TakeAction(ctx)
+			if err != nil || finiteSource == nil {
+				t.Fatalf("source claim: %+v %v", finiteSource, err)
+			}
+			enableBan(t, a, -1)
+			deliver(t, a, 2, caller)
+			deliver(t, a, 3, guestReply(caller, 2, 200))
+			doAction(t, a)
+			if _, err := a.Store.CompleteAction(ctx, finiteSource.ID, "succeeded", ""); err != nil {
+				t.Fatal(err)
+			}
+			if injectLink {
+				db, err := sql.Open("sqlite", path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = db.Exec(`INSERT OR IGNORE INTO bot_invocation_actions(source_action_id,target_action_id) SELECT ?,id FROM actions WHERE kind='ban'`, finiteSource.ID)
+				db.Close()
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := a.Store.SetBotBlocked(ctx, store.BotIdentity{ID: 200}, false, 9, 9003); err != nil {
+				t.Fatal(err)
+			}
+			drainActions(t, a, path)
+			if len(probe.bans()) != 0 || scalar(t, path, `SELECT count(*) FROM actions WHERE kind='ban' AND status='skipped'`) != 1 {
+				t.Fatal("finite-only source authorized permanent ban")
+			}
+			if !injectLink && scalar(t, path, `SELECT count(*) FROM bot_invocation_actions l JOIN actions a ON a.id=l.target_action_id WHERE l.source_action_id=`+strconv.FormatInt(finiteSource.ID, 10)+` AND a.kind='ban'`) != 0 {
+				t.Fatal("mismatched rule linked to existing ban")
+			}
+		})
+	}
+}

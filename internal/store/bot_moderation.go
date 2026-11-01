@@ -88,14 +88,24 @@ func planBotActionTx(ctx context.Context, tx *sql.Tx, j Job, kind string, bot, g
 		}
 		if n == 0 {
 			var existing int64
-			var oldStatus, oldKind string
-			err := tx.QueryRowContext(ctx, `SELECT a.id,a.status,coalesce(e.kind,'') FROM actions a LEFT JOIN action_evidence e ON e.action_id=a.id WHERE a.revision_id=? AND a.kind=?`, j.ID, actionKind).Scan(&existing, &oldStatus, &oldKind)
+			var oldStatus, oldKind, oldRuleID string
+			var oldRaw []byte
+			err := tx.QueryRowContext(ctx, `SELECT a.id,a.status,coalesce(e.kind,''),a.rule_id,a.rule FROM actions a LEFT JOIN action_evidence e ON e.action_id=a.id WHERE a.revision_id=? AND a.kind=?`, j.ID, actionKind).Scan(&existing, &oldStatus, &oldKind, &oldRuleID, &oldRaw)
 			if err != nil {
 				return 0, nil, err
 			}
 			upgrade := kind == "bot_invocation" && mode == "enforce" && j.Snapshot.Policy.Mode == "enforce" && sourceAction > 0 &&
 				((oldKind == "bot_invocation" && (oldStatus == "recorded" || oldStatus == "skipped")) || (oldKind == "" && oldStatus == "skipped"))
 			if !upgrade {
+				if actionKind == "ban" {
+					var oldRule config.Rule
+					if err := json.Unmarshal(oldRaw, &oldRule); err != nil {
+						return 0, nil, err
+					}
+					if sourcePolicy == nil || !oldRule.Enabled || oldRule.Target != "caller" || sourcePolicy.Rules[oldRuleID] != oldRule {
+						return 0, nil, nil
+					}
+				}
 				return existing, nil, nil
 			}
 			if err := auditBotActionTx(ctx, tx, existing, "before_upgrade"); err != nil {
@@ -403,9 +413,9 @@ func (s *Store) checkBotAction(ctx context.Context, a Action) (bool, string, inv
 		if !invocationTargetEligible(*j, &target) {
 			return false, "invocation target changed", none, nil
 		}
-		rows, err := s.db.QueryContext(ctx, `SELECT i.source_action_id,i.bot_id,i.user_id,i.fingerprint,source.mode,source.status,coalesce(e.kind,''),coalesce(e.bot_id,0),coalesce(e.generation,0)
+		rows, err := s.db.QueryContext(ctx, `SELECT i.source_action_id,i.bot_id,i.user_id,i.fingerprint,source.mode,source.status,coalesce(e.kind,''),coalesce(e.bot_id,0),coalesce(e.generation,0),r.snapshot
  FROM bot_invocation_actions l JOIN bot_invocations i ON i.source_action_id=l.source_action_id
- JOIN actions source ON source.id=i.source_action_id LEFT JOIN action_evidence e ON e.action_id=source.id
+ JOIN actions source ON source.id=i.source_action_id JOIN revisions r ON r.id=source.revision_id LEFT JOIN action_evidence e ON e.action_id=source.id
  WHERE l.target_action_id=? ORDER BY i.source_action_id DESC`, a.ID)
 		if err != nil {
 			return false, "", none, err
@@ -413,11 +423,12 @@ func (s *Store) checkBotAction(ctx context.Context, a Action) (bool, string, inv
 		type proof struct {
 			action, bot, user, sourceBot, generation int64
 			fingerprint, mode, status, kind          string
+			snapshot                                 []byte
 		}
 		var proofs []proof
 		for rows.Next() {
 			var p proof
-			if err := rows.Scan(&p.action, &p.bot, &p.user, &p.fingerprint, &p.mode, &p.status, &p.kind, &p.sourceBot, &p.generation); err != nil {
+			if err := rows.Scan(&p.action, &p.bot, &p.user, &p.fingerprint, &p.mode, &p.status, &p.kind, &p.sourceBot, &p.generation, &p.snapshot); err != nil {
 				rows.Close()
 				return false, "", none, err
 			}
@@ -432,6 +443,15 @@ func (s *Store) checkBotAction(ctx context.Context, a Action) (bool, string, inv
 		for _, p := range proofs {
 			if p.user != a.UserID || p.fingerprint != fingerprint || p.mode != "enforce" || p.status != "succeeded" {
 				continue
+			}
+			if a.Kind == "ban" {
+				var source Snapshot
+				if err := json.Unmarshal(p.snapshot, &source); err != nil {
+					return false, "", none, err
+				}
+				if !a.Rule.Enabled || a.Rule.Target != "caller" || source.Policy.Rules[a.RuleID] != a.Rule {
+					continue
+				}
 			}
 			if p.kind == "bot_blacklist" {
 				if p.sourceBot != p.bot {
