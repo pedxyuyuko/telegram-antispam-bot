@@ -255,3 +255,214 @@ func TestCallerBanRequiresOfficialCallerAndMatchingArchive(t *testing.T) {
 		})
 	}
 }
+
+func TestCallerBanKeepsMultipleSourcesWithoutDuplicatePunishment(t *testing.T) {
+	for _, removed := range []int64{200, 201} {
+		t.Run(strconv.FormatInt(removed, 10), func(t *testing.T) {
+			probe := &banProbe{}
+			a, path, deletes := botFixture(t, "member", "enforce", probe.observe)
+			enableBan(t, a, -1)
+			ctx := context.Background()
+			for i, id := range []int64{200, 201} {
+				if _, err := a.Store.SetBotBlocked(ctx, store.BotIdentity{ID: id}, true, 9, int64(9001+i)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			caller := message(50, "@first_bot @second_bot")
+			deliver(t, a, 1, caller)
+			deliver(t, a, 2, guestReply(caller, 2, 200))
+			deliver(t, a, 3, guestReply(caller, 3, 201))
+			doAction(t, a)
+			doAction(t, a)
+			if _, err := a.Store.SetBotBlocked(ctx, store.BotIdentity{ID: removed}, false, 9, 9003); err != nil {
+				t.Fatal(err)
+			}
+			drainActions(t, a, path)
+			if len(probe.bans()) != 1 || len(deletes.deletes()) != 3 || scalar(t, path, `SELECT count(*) FROM bot_invocation_actions`) != 4 {
+				t.Fatal("multi-source actions duplicated or evidence lost")
+			}
+			if scalar(t, path, `SELECT count(*) FROM action_evidence e JOIN actions a ON a.id=e.action_id WHERE a.message_id=1 AND e.bot_id=`+strconv.FormatInt(401-removed, 10)) != 2 {
+				t.Fatal("valid evidence was not selected for both actions")
+			}
+		})
+	}
+}
+
+func TestLateCallerBanUpgradesRecordedIntentOnlyWithNewConfirmedEvidence(t *testing.T) {
+	probe := &banProbe{}
+	a, path, deletes := botFixture(t, "member", "record", probe.observe)
+	enableBan(t, a, -1)
+	caller := message(50, "@first_bot @second_bot")
+	deliver(t, a, 1, guestReply(caller, 2, 200))
+	runModel(t, a, time.Now())
+	if err := a.Config.Set(nil, "mode", json.RawMessage(`"enforce"`)); err != nil {
+		t.Fatal(err)
+	}
+	deliver(t, a, 2, guestReply(caller, 3, 201))
+	runModel(t, a, time.Now())
+	doAction(t, a)
+	deliver(t, a, 3, caller)
+	drainActions(t, a, path)
+	if len(probe.bans()) != 1 || len(deletes.deletes()) != 2 {
+		t.Fatal("late caller remained pinned to recorded source")
+	}
+	if scalar(t, path, `SELECT count(*) FROM bot_action_events e JOIN actions a ON a.id=e.action_id WHERE a.message_id=1 AND e.event='before_upgrade' AND e.status='recorded'`) != 2 {
+		t.Fatal("original delete and ban intents missing from audit")
+	}
+}
+
+func TestEnablingCallerBanPreservesPreviouslyCapturedInvocations(t *testing.T) {
+	for _, sourceFirst := range []bool{false, true} {
+		t.Run(strconv.FormatBool(sourceFirst), func(t *testing.T) {
+			probe := &banProbe{}
+			a, path, deletes := botFixture(t, "member", "enforce", probe.observe)
+			caller := message(50, "@ad_bot")
+			if sourceFirst {
+				deliver(t, a, 1, guestReply(caller, 2, 200))
+				runModel(t, a, time.Now())
+				doAction(t, a)
+			} else {
+				deliver(t, a, 1, caller)
+				runModel(t, a, time.Now())
+			}
+			enableBan(t, a, -1)
+			if sourceFirst {
+				deliver(t, a, 2, caller)
+			} else {
+				deliver(t, a, 2, guestReply(caller, 2, 200))
+				runModel(t, a, time.Now())
+			}
+			drainActions(t, a, path)
+			if len(probe.bans()) != 0 || scalar(t, path, `SELECT count(*) FROM actions WHERE kind='ban'`) != 0 || len(deletes.deletes()) != 2 {
+				t.Fatal("enabling ban retroactively punished archived invocation")
+			}
+		})
+	}
+}
+
+func TestCallerBanRevalidatesAfterMembershipNetworkWait(t *testing.T) {
+	for _, change := range []string{"blacklist", "policy", "edit"} {
+		t.Run(change, func(t *testing.T) {
+			var block atomic.Bool
+			entered := make(chan struct{}, 1)
+			release := make(chan struct{})
+			var once sync.Once
+			t.Cleanup(func() { once.Do(func() { close(release) }) })
+			probe := &banProbe{}
+			a, path := appFixture(t, "member", probe.observe, func(r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "getChatMember") && block.Load() {
+					select {
+					case entered <- struct{}{}:
+					default:
+					}
+					select {
+					case <-release:
+					case <-r.Context().Done():
+					}
+				}
+			})
+			if err := a.Config.Set(nil, "mode", json.RawMessage(`"enforce"`)); err != nil {
+				t.Fatal(err)
+			}
+			enableBan(t, a, -1)
+			if _, err := a.Store.SetBotBlocked(context.Background(), store.BotIdentity{ID: 200}, true, 9, 9001); err != nil {
+				t.Fatal(err)
+			}
+			caller := message(50, "@ad_bot")
+			deliver(t, a, 1, caller)
+			deliver(t, a, 2, guestReply(caller, 2, 200))
+			doAction(t, a)
+			doAction(t, a)
+			block.Store(true)
+			done := make(chan error, 1)
+			go func() { _, err := a.ProcessAction(context.Background()); done <- err }()
+			select {
+			case <-entered:
+			case <-time.After(3 * time.Second):
+				t.Fatal("membership did not start")
+			}
+			switch change {
+			case "blacklist":
+				if _, err := a.Store.SetBotBlocked(context.Background(), store.BotIdentity{ID: 200}, false, 9, 9002); err != nil {
+					t.Fatal(err)
+				}
+			case "policy":
+				if err := a.Config.Set(nil, "rules.ban.enabled", json.RawMessage(`false`)); err != nil {
+					t.Fatal(err)
+				}
+			case "edit":
+				block.Store(false)
+				edited := *caller
+				edited.Text = "ordinary discussion"
+				edited.EditDate = caller.Date + 1
+				deliver(t, a, 3, &edited)
+			}
+			once.Do(func() { close(release) })
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("ban did not finish")
+			}
+			if len(probe.bans()) != 0 || scalar(t, path, `SELECT count(*) FROM actions WHERE kind='ban' AND status='skipped'`) != 1 {
+				t.Fatal("stale ban crossed final dispatch guard")
+			}
+		})
+	}
+}
+
+func TestVersionFourMigrationPreservesInvocationHistoryWithoutNewActions(t *testing.T) {
+	a, path, _ := botFixture(t, "member", "enforce")
+	caller := message(50, "@ad_bot")
+	deliver(t, a, 1, caller)
+	runModel(t, a, time.Now())
+	deliver(t, a, 2, guestReply(caller, 2, 200))
+	runModel(t, a, time.Now())
+	drainActions(t, a, path)
+	ctx := context.Background()
+	before, err := a.Store.Revision(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := scalar(t, path, `SELECT count(*) FROM bot_action_events`)
+	if err := a.Store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`DROP TABLE bot_invocation_actions; PRAGMA user_version=4;`)
+	db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	after, err := s.Revision(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before.Raw) != string(after.Raw) || scalar(t, path, `SELECT count(*) FROM actions`) != 2 || scalar(t, path, `SELECT count(*) FROM bot_action_events`) != events {
+		t.Fatal("migration modified history")
+	}
+	if scalar(t, path, `SELECT count(*) FROM bot_invocation_actions`) != 1 || scalar(t, path, `SELECT count(*) FROM actions WHERE status='pending' OR kind='ban'`) != 0 {
+		t.Fatal("migration lost delete link or created historical ban")
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if scalar(t, path, `SELECT count(*) FROM bot_invocation_actions`) != 1 {
+		t.Fatal("restart duplicated migration links")
+	}
+}
