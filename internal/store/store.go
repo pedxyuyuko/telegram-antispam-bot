@@ -135,7 +135,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if version > 4 {
+	if version > 5 {
 		db.Close()
 		return nil, fmt.Errorf("unsupported database schema version %d", version)
 	}

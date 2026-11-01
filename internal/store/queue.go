@@ -69,7 +69,7 @@ func (s *Store) AddRevision(ctx context.Context, in Inbox, m *telegram.Message, 
 			report.BlacklistBotID = blocked.BotID
 			report.BlacklistGeneration = blocked.Generation
 			report.Actions = blocked.Actions
-			report.LinkedDelete = blocked.LinkedDelete
+			report.LinkedActions = blocked.LinkedActions
 			job.Status = blocked.Status
 		}
 	}
@@ -77,9 +77,7 @@ func (s *Store) AddRevision(ctx context.Context, in Inbox, m *telegram.Message, 
 	if err != nil {
 		return ArchiveReport{}, err
 	}
-	if linked != nil {
-		report.LinkedDelete = linked
-	}
+	report.LinkedActions = append(report.LinkedActions, linked...)
 	evicted, err := trim(ctx, tx, m.Chat.ID, snapshot.Policy.QueueLimit)
 	if err != nil {
 		return ArchiveReport{}, err

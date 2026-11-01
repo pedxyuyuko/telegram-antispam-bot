@@ -8,7 +8,7 @@ type ArchiveReport struct {
 	SkipReason                          string
 	BlacklistBotID, BlacklistGeneration int64
 	Actions                             []PlannedAction
-	LinkedDelete                        *LinkedDelete
+	LinkedActions                       []LinkedAction
 	ID                                  int64
 	Status                              string
 	Duplicate                           bool
@@ -42,12 +42,12 @@ type PlannedAction struct {
 }
 
 type FinishReport struct {
-	LinkedDelete *LinkedDelete
-	AttemptID    int64
-	Status       string
-	Reason       string
-	RetryAt      int64
-	Evaluation   *decision.Evaluation
-	Rules        []RuleReport
-	Actions      []PlannedAction
+	LinkedActions []LinkedAction
+	AttemptID     int64
+	Status        string
+	Reason        string
+	RetryAt       int64
+	Evaluation    *decision.Evaluation
+	Rules         []RuleReport
+	Actions       []PlannedAction
 }

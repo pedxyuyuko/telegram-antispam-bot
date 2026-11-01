@@ -137,8 +137,8 @@ func (a *App) ProcessInbox(ctx context.Context) (bool, error) {
 	for _, action := range archived.Actions {
 		debug(diagnostic, "action.planned", "action_id", action.ID, "action", action.Kind, "rule", action.RuleID, "status", action.Status, "source", "bot_blacklist")
 	}
-	if link := archived.LinkedDelete; link != nil {
-		debug(diagnostic, "invocation.planned", "target_message", link.MessageID, "target_revision", link.RevisionID, "action_id", link.ActionID, "source_action", link.SourceActionID)
+	for _, link := range archived.LinkedActions {
+		debug(diagnostic, "invocation.planned", "target_message", link.MessageID, "target_revision", link.RevisionID, "action_id", link.ActionID, "source_action", link.SourceActionID, "action", link.Kind)
 	}
 	if archived.Evicted > 0 {
 		debug(diagnostic, "queue.evicted", "evicted", archived.Evicted, "queue_limit", policy.QueueLimit, "reason", "new_message")

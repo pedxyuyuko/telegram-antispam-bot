@@ -8,20 +8,22 @@ import (
 	"sort"
 	"time"
 
+	"telegram-antispam-bot/internal/config"
 	"telegram-antispam-bot/internal/telegram"
 )
 
-type LinkedDelete struct {
+type LinkedAction struct {
 	ActionID, RevisionID, SourceActionID int64
 	MessageID                            int
+	Kind                                 string
 }
 type BotEffects struct {
 	BotID            int64
 	AddedToBlacklist bool
-	LinkedDelete     *LinkedDelete
+	LinkedActions    []LinkedAction
 }
 type BlacklistReport struct {
-	LinkedDelete      *LinkedDelete
+	LinkedActions     []LinkedAction
 	Handled           bool
 	BotID, Generation int64
 	Status            string
@@ -35,7 +37,7 @@ func auditBotActionTx(ctx context.Context, tx *sql.Tx, action int64, event strin
 	return err
 }
 
-func planBotDeleteTx(ctx context.Context, tx *sql.Tx, j Job, kind string, bot, generation, sourceAction int64, mode string) (int64, *PlannedAction, error) {
+func planBotActionTx(ctx context.Context, tx *sql.Tx, j Job, kind string, bot, generation, sourceAction int64, mode, actionKind string, sourcePolicy *config.Policy) (int64, *PlannedAction, error) {
 	ids := make([]string, 0, len(j.Snapshot.Policy.Rules))
 	for id := range j.Snapshot.Policy.Rules {
 		ids = append(ids, id)
@@ -43,7 +45,10 @@ func planBotDeleteTx(ctx context.Context, tx *sql.Tx, j Job, kind string, bot, g
 	sort.Strings(ids)
 	for _, id := range ids {
 		rule := j.Snapshot.Policy.Rules[id]
-		if !rule.Enabled || rule.Action != "delete" {
+		if !rule.Enabled || rule.Action != actionKind {
+			continue
+		}
+		if actionKind == "ban" && (rule.Target != "caller" || sourcePolicy == nil || sourcePolicy.Rules[id] != rule) {
 			continue
 		}
 		status := "recorded"
@@ -54,7 +59,11 @@ func planBotDeleteTx(ctx context.Context, tx *sql.Tx, j Job, kind string, bot, g
 		if err != nil {
 			return 0, nil, err
 		}
-		inserted, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO actions(revision_id,chat_id,message_id,user_id,rule_id,rule,kind,mode,until_date,status,created_at) VALUES(?,?,?,?,?,?,'delete',?,0,?,?)`, j.ID, j.ChatID, j.MessageID, j.UserID, id, string(raw), mode, status, time.Now().UnixMilli())
+		until := int64(0)
+		if actionKind == "ban" && rule.DurationSeconds > 0 {
+			until = time.Now().Unix() + int64(rule.DurationSeconds)
+		}
+		inserted, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO actions(revision_id,chat_id,message_id,user_id,rule_id,rule,kind,mode,until_date,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, j.ID, j.ChatID, j.MessageID, j.UserID, id, string(raw), actionKind, mode, until, status, time.Now().UnixMilli())
 		if err != nil {
 			return 0, nil, err
 		}
@@ -65,7 +74,7 @@ func planBotDeleteTx(ctx context.Context, tx *sql.Tx, j Job, kind string, bot, g
 		if n == 0 {
 			var existing int64
 			var oldStatus, oldKind string
-			err := tx.QueryRowContext(ctx, `SELECT a.id,a.status,coalesce(e.kind,'') FROM actions a LEFT JOIN action_evidence e ON e.action_id=a.id WHERE a.revision_id=? AND a.kind='delete'`, j.ID).Scan(&existing, &oldStatus, &oldKind)
+			err := tx.QueryRowContext(ctx, `SELECT a.id,a.status,coalesce(e.kind,'') FROM actions a LEFT JOIN action_evidence e ON e.action_id=a.id WHERE a.revision_id=? AND a.kind=?`, j.ID, actionKind).Scan(&existing, &oldStatus, &oldKind)
 			if err != nil {
 				return 0, nil, err
 			}
@@ -77,7 +86,7 @@ func planBotDeleteTx(ctx context.Context, tx *sql.Tx, j Job, kind string, bot, g
 			if err := auditBotActionTx(ctx, tx, existing, "before_upgrade"); err != nil {
 				return 0, nil, err
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE actions SET mode='enforce',status='pending',rule_id=?,rule=?,detail='' WHERE id=?`, id, string(raw), existing); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE actions SET mode='enforce',status='pending',rule_id=?,rule=?,until_date=?,detail='' WHERE id=?`, id, string(raw), until, existing); err != nil {
 				return 0, nil, err
 			}
 			if _, err := tx.ExecContext(ctx, `INSERT INTO action_evidence(action_id,kind,bot_id,generation,source_action_id) VALUES(?,'bot_invocation',?,0,?) ON CONFLICT(action_id) DO UPDATE SET kind='bot_invocation',bot_id=excluded.bot_id,generation=0,source_action_id=excluded.source_action_id`, existing, bot, sourceAction); err != nil {
@@ -86,7 +95,7 @@ func planBotDeleteTx(ctx context.Context, tx *sql.Tx, j Job, kind string, bot, g
 			if err := auditBotActionTx(ctx, tx, existing, "upgraded"); err != nil {
 				return 0, nil, err
 			}
-			return existing, &PlannedAction{ID: existing, RuleID: id, Kind: "delete", Status: "pending"}, nil
+			return existing, &PlannedAction{ID: existing, RuleID: id, Kind: actionKind, Status: "pending", Until: until}, nil
 		}
 		action, err := inserted.LastInsertId()
 		if err != nil {
@@ -102,7 +111,7 @@ func planBotDeleteTx(ctx context.Context, tx *sql.Tx, j Job, kind string, bot, g
 		if err := auditBotActionTx(ctx, tx, action, "planned"); err != nil {
 			return 0, nil, err
 		}
-		return action, &PlannedAction{ID: action, RuleID: id, Kind: "delete", Status: status}, nil
+		return action, &PlannedAction{ID: action, RuleID: id, Kind: actionKind, Status: status, Until: until}, nil
 	}
 	return 0, nil, nil
 }
@@ -146,14 +155,14 @@ func applyBlacklistTx(ctx context.Context, tx *sql.Tx, j Job, m *telegram.Messag
 	}
 	report = BlacklistReport{Handled: true, BotID: entry.ID, Generation: entry.Generation, Status: status}
 	if status == "succeeded" {
-		id, planned, err := planBotDeleteTx(ctx, tx, j, "bot_blacklist", entry.ID, entry.Generation, 0, j.Snapshot.Policy.Mode)
+		id, planned, err := planBotActionTx(ctx, tx, j, "bot_blacklist", entry.ID, entry.Generation, 0, j.Snapshot.Policy.Mode, "delete", nil)
 		if err != nil {
 			return BlacklistReport{}, err
 		}
 		if planned != nil {
 			report.Actions = append(report.Actions, *planned)
 			if planned.Status == "recorded" {
-				report.LinkedDelete, err = rememberInvocationTx(ctx, tx, id, j)
+				report.LinkedActions, err = rememberInvocationTx(ctx, tx, id, j)
 				if err != nil {
 					return BlacklistReport{}, err
 				}
@@ -187,7 +196,7 @@ func invocationTargetEligible(j Job, m *telegram.Message) bool {
 	return (j.Status == "pending" || j.Status == "running" || j.Status == "succeeded" || j.Status == "evicted") && m.IsGroup() && m.From != nil && !m.From.IsBot && m.UserID() > 0 && m.SenderChat == nil && !m.IsAutomaticForward
 }
 
-func resolveInvocationsTx(ctx context.Context, tx *sql.Tx, j Job) (*LinkedDelete, error) {
+func resolveInvocationsTx(ctx context.Context, tx *sql.Tx, j Job) ([]LinkedAction, error) {
 	var target telegram.Message
 	if err := json.Unmarshal(j.Raw, &target); err != nil {
 		return nil, err
@@ -195,20 +204,21 @@ func resolveInvocationsTx(ctx context.Context, tx *sql.Tx, j Job) (*LinkedDelete
 	if !invocationTargetEligible(j, &target) {
 		return nil, nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT i.source_action_id,i.bot_id,i.user_id,i.fingerprint,a.mode,a.status
- FROM bot_invocations i JOIN actions a ON a.id=i.source_action_id
- WHERE i.chat_id=? AND i.message_id=? AND i.target_action_id IS NULL ORDER BY i.source_action_id`, j.ChatID, j.MessageID)
+	rows, err := tx.QueryContext(ctx, `SELECT i.source_action_id,i.bot_id,i.user_id,i.fingerprint,a.mode,a.status,r.snapshot
+ FROM bot_invocations i JOIN actions a ON a.id=i.source_action_id JOIN revisions r ON r.id=a.revision_id
+ WHERE i.chat_id=? AND i.message_id=? ORDER BY i.source_action_id`, j.ChatID, j.MessageID)
 	if err != nil {
 		return nil, err
 	}
 	type proof struct {
 		action, bot, user         int64
 		fingerprint, mode, status string
+		snapshot                  []byte
 	}
 	var proofs []proof
 	for rows.Next() {
 		var p proof
-		if err := rows.Scan(&p.action, &p.bot, &p.user, &p.fingerprint, &p.mode, &p.status); err != nil {
+		if err := rows.Scan(&p.action, &p.bot, &p.user, &p.fingerprint, &p.mode, &p.status, &p.snapshot); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -219,7 +229,7 @@ func resolveInvocationsTx(ctx context.Context, tx *sql.Tx, j Job) (*LinkedDelete
 	if err != nil {
 		return nil, err
 	}
-	var created *LinkedDelete
+	var created []LinkedAction
 	for _, p := range proofs {
 		if p.user != j.UserID || p.fingerprint != target.InvocationFingerprint() {
 			continue
@@ -231,24 +241,43 @@ func resolveInvocationsTx(ctx context.Context, tx *sql.Tx, j Job) (*LinkedDelete
 		if j.Snapshot.Policy.Mode == "enforce" && p.mode == "enforce" && p.status == "succeeded" {
 			mode = "enforce"
 		}
-		id, planned, err := planBotDeleteTx(ctx, tx, j, "bot_invocation", p.bot, 0, p.action, mode)
-		if err != nil {
+		var source Snapshot
+		if err := json.Unmarshal(p.snapshot, &source); err != nil {
 			return nil, err
 		}
-		if id == 0 {
-			continue
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE bot_invocations SET target_action_id=? WHERE source_action_id=?`, id, p.action); err != nil {
-			return nil, err
-		}
-		if planned != nil {
-			created = &LinkedDelete{ActionID: id, RevisionID: j.ID, SourceActionID: p.action, MessageID: j.MessageID}
+		for _, actionKind := range []string{"delete", "ban"} {
+			var linked int
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM bot_invocation_actions l JOIN actions a ON a.id=l.target_action_id WHERE l.source_action_id=? AND a.revision_id=? AND a.kind=?`, p.action, j.ID, actionKind).Scan(&linked); err != nil {
+				return nil, err
+			}
+			if linked > 0 {
+				continue
+			}
+			id, planned, err := planBotActionTx(ctx, tx, j, "bot_invocation", p.bot, 0, p.action, mode, actionKind, &source.Policy)
+			if err != nil {
+				return nil, err
+			}
+			if id == 0 {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO bot_invocation_actions(source_action_id,target_action_id) VALUES(?,?)`, p.action, id); err != nil {
+				return nil, err
+			}
+			// Retain the original delete reference for old audit consumers.
+			if actionKind == "delete" {
+				if _, err := tx.ExecContext(ctx, `UPDATE bot_invocations SET target_action_id=? WHERE source_action_id=?`, id, p.action); err != nil {
+					return nil, err
+				}
+			}
+			if planned != nil {
+				created = append(created, LinkedAction{ActionID: id, RevisionID: j.ID, SourceActionID: p.action, MessageID: j.MessageID, Kind: actionKind})
+			}
 		}
 	}
 	return created, nil
 }
 
-func rememberInvocationTx(ctx context.Context, tx *sql.Tx, sourceAction int64, j Job) (*LinkedDelete, error) {
+func rememberInvocationTx(ctx context.Context, tx *sql.Tx, sourceAction int64, j Job) ([]LinkedAction, error) {
 	var m telegram.Message
 	if err := json.Unmarshal(j.Raw, &m); err != nil {
 		return nil, err
@@ -319,7 +348,7 @@ func (s *Store) CompleteAction(ctx context.Context, id int64, status, detail str
 						return BotEffects{}, err
 					}
 				}
-				effects.LinkedDelete, err = rememberInvocationTx(ctx, tx, id, *j)
+				effects.LinkedActions, err = rememberInvocationTx(ctx, tx, id, *j)
 				if err != nil {
 					return BotEffects{}, err
 				}
@@ -360,8 +389,9 @@ func (s *Store) checkBotAction(ctx context.Context, a Action) (bool, string, inv
 			return false, "invocation target changed", none, nil
 		}
 		rows, err := s.db.QueryContext(ctx, `SELECT i.source_action_id,i.bot_id,i.user_id,i.fingerprint,source.mode,source.status,coalesce(e.kind,''),coalesce(e.bot_id,0),coalesce(e.generation,0)
- FROM bot_invocations i JOIN actions source ON source.id=i.source_action_id LEFT JOIN action_evidence e ON e.action_id=source.id
- WHERE i.target_action_id=? ORDER BY i.source_action_id DESC`, a.ID)
+ FROM bot_invocation_actions l JOIN bot_invocations i ON i.source_action_id=l.source_action_id
+ JOIN actions source ON source.id=i.source_action_id LEFT JOIN action_evidence e ON e.action_id=source.id
+ WHERE l.target_action_id=? ORDER BY i.source_action_id DESC`, a.ID)
 		if err != nil {
 			return false, "", none, err
 		}

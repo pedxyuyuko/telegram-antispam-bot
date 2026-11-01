@@ -34,7 +34,15 @@ CREATE TABLE IF NOT EXISTS bot_invocations(
  source_action_id INTEGER PRIMARY KEY REFERENCES actions(id),bot_id INTEGER NOT NULL,chat_id INTEGER NOT NULL,message_id INTEGER NOT NULL,
  user_id INTEGER NOT NULL,fingerprint TEXT NOT NULL,target_action_id INTEGER REFERENCES actions(id),created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS pending_bot_invocations ON bot_invocations(chat_id,message_id) WHERE target_action_id IS NULL;
-PRAGMA user_version=4;`
+CREATE INDEX IF NOT EXISTS bot_invocation_targets ON bot_invocations(chat_id,message_id);
+CREATE TABLE IF NOT EXISTS bot_invocation_actions(
+ source_action_id INTEGER NOT NULL REFERENCES bot_invocations(source_action_id),
+ target_action_id INTEGER NOT NULL REFERENCES actions(id),
+ PRIMARY KEY(source_action_id,target_action_id));
+CREATE INDEX IF NOT EXISTS invocation_action_sources ON bot_invocation_actions(target_action_id,source_action_id);
+INSERT OR IGNORE INTO bot_invocation_actions(source_action_id,target_action_id)
+ SELECT source_action_id,target_action_id FROM bot_invocations WHERE target_action_id IS NOT NULL;
+PRAGMA user_version=5;`
 
 type BotIdentity struct {
 	ID             int64

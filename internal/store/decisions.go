@@ -203,7 +203,7 @@ func (s *Store) finish(ctx context.Context, j Job, result decision.Result, infer
 			}
 			report.Actions = append(report.Actions, PlannedAction{ID: id, RuleID: c.id, Kind: kind, Status: actionStatus, Until: until})
 			if kind == "delete" && actionStatus == "recorded" {
-				report.LinkedDelete, err = rememberInvocationTx(ctx, tx, id, j)
+				report.LinkedActions, err = rememberInvocationTx(ctx, tx, id, j)
 				if err != nil {
 					return err
 				}

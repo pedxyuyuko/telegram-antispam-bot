@@ -41,8 +41,8 @@ func (a *App) ProcessModel(ctx context.Context, now time.Time) (bool, error) {
 			for _, action := range blocked.Actions {
 				debug(diagnostic, "action.planned", "action_id", action.ID, "action", action.Kind, "rule", action.RuleID, "status", action.Status, "source", "bot_blacklist")
 			}
-			if link := blocked.LinkedDelete; link != nil {
-				debug(diagnostic, "invocation.planned", "target_message", link.MessageID, "target_revision", link.RevisionID, "action_id", link.ActionID, "source_action", link.SourceActionID)
+			for _, link := range blocked.LinkedActions {
+				debug(diagnostic, "invocation.planned", "target_message", link.MessageID, "target_revision", link.RevisionID, "action_id", link.ActionID, "source_action", link.SourceActionID, "action", link.Kind)
 			}
 			return true, nil
 		}
@@ -90,8 +90,8 @@ func (a *App) ProcessModel(ctx context.Context, now time.Time) (bool, error) {
 		for _, action := range report.Actions {
 			debug(diagnostic, "action.planned", "action_id", action.ID, "action", action.Kind, "rule", action.RuleID, "status", action.Status, "until", action.Until, "mode", j.Snapshot.Policy.Mode)
 		}
-		if link := report.LinkedDelete; link != nil {
-			debug(diagnostic, "invocation.planned", "target_message", link.MessageID, "target_revision", link.RevisionID, "action_id", link.ActionID, "source_action", link.SourceActionID)
+		for _, link := range report.LinkedActions {
+			debug(diagnostic, "invocation.planned", "target_message", link.MessageID, "target_revision", link.RevisionID, "action_id", link.ActionID, "source_action", link.SourceActionID, "action", link.Kind)
 		}
 	}
 	return true, nil
@@ -118,8 +118,8 @@ func (a *App) ProcessAction(ctx context.Context) (bool, error) {
 		if effects.AddedToBlacklist {
 			diagnostic.Info("bot added to global blacklist", "event", "blacklist.added", "bot_id", effects.BotID, "source_action", intent.ID)
 		}
-		if link := effects.LinkedDelete; link != nil {
-			debug(diagnostic, "invocation.planned", "target_message", link.MessageID, "target_revision", link.RevisionID, "action_id", link.ActionID, "source_action", link.SourceActionID)
+		for _, link := range effects.LinkedActions {
+			debug(diagnostic, "invocation.planned", "target_message", link.MessageID, "target_revision", link.RevisionID, "action_id", link.ActionID, "source_action", link.SourceActionID, "action", link.Kind)
 		}
 		return true, err
 	}
@@ -233,6 +233,21 @@ func (a *App) ProcessAction(ctx context.Context) (bool, error) {
 	}
 	defer release()
 	switch intent.Kind {
+	case "ban":
+		if intent.Rule.Target != "caller" || intent.EvidenceKind != "bot_invocation" {
+			detail = "ban requires confirmed caller evidence"
+			return finish()
+		}
+		var until time.Time
+		if intent.Rule.DurationSeconds != -1 {
+			until = time.Unix(intent.Until, 0)
+			if time.Until(until) < 30*time.Second {
+				detail = "ban deadline has expired"
+				return finish()
+			}
+		}
+		debug(diagnostic, "action.dispatching")
+		err = a.Telegram.Ban(callCtx, intent.ChatID, intent.UserID, until)
 	case "delete":
 		debug(diagnostic, "action.dispatching")
 		err = a.Telegram.Delete(callCtx, intent.ChatID, intent.MessageID)

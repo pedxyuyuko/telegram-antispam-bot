@@ -27,10 +27,13 @@ func (p *botProbe) deletes() []int {
 	defer p.mu.Unlock()
 	return append([]int(nil), p.deleted...)
 }
-func botFixture(t *testing.T, role, mode string) (*App, string, *botProbe) {
+func botFixture(t *testing.T, role, mode string, observers ...func(*http.Request)) (*App, string, *botProbe) {
 	t.Helper()
 	probe := &botProbe{}
 	a, path := appFixture(t, role, func(r *http.Request) {
+		for _, observe := range observers {
+			observe(r)
+		}
 		if strings.HasSuffix(r.URL.Path, "deleteMessage") {
 			if err := r.ParseMultipartForm(1 << 20); err != nil {
 				t.Error(err)
