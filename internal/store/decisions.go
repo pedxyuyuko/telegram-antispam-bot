@@ -116,6 +116,9 @@ func (s *Store) finish(ctx context.Context, j Job, result decision.Result, infer
 	chosen := map[string]candidate{}
 	for _, id := range ids {
 		r := policy.Rules[id]
+		if r.Target == "caller" {
+			continue
+		}
 		p, present := evaluation.Values["p."+r.Question]
 		trace := RuleReport{ID: id, Question: r.Question, Threshold: r.Threshold, Required: r.Count, WindowSeconds: r.WindowSeconds}
 		if present {

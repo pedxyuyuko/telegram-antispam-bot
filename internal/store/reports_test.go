@@ -64,6 +64,29 @@ func TestFinishReportsScoringCountAndRecordedActions(t *testing.T) {
 	}
 }
 
+func TestSenderScoringKeepsCallerBanOutsideHitHistory(t *testing.T) {
+	s := openTest(t)
+	p := config.Defaults().Base
+	r := p.Rules["ban"]
+	r.Enabled = true
+	p.Rules["ban"] = r
+	add(t, s, 1, -100, 1, 42, p)
+	j, err := s.Claim(context.Background(), testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Finish(context.Background(), *j, decision.Result{Probabilities: map[string]float64{"violation": .99}}, nil, testNow, 10); err != nil {
+		t.Fatal(err)
+	}
+	var hits int
+	if err := s.db.QueryRow(`SELECT count(*) FROM hits WHERE rule_id='ban'`).Scan(&hits); err != nil {
+		t.Fatal(err)
+	}
+	if hits != 0 {
+		t.Fatal("sender scoring counted caller-only ban evidence")
+	}
+}
+
 func TestFinishReportsRetryAndStaleOutcomes(t *testing.T) {
 	for _, scenario := range []string{"retry", "evicted_failure", "superseded"} {
 		t.Run(scenario, func(t *testing.T) {

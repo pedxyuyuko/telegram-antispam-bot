@@ -32,6 +32,7 @@ type Rule struct {
 	WindowSeconds   int     `json:"window_seconds"`
 	Action          string  `json:"action"`
 	DurationSeconds int     `json:"duration_seconds"`
+	Target          string  `json:"target,omitempty"`
 }
 
 type Policy struct {
@@ -88,8 +89,9 @@ func Defaults() Config {
 			"violation": {Type: "noul", Instructions: prefix + "综合消息正文、媒体配文、按钮、链接、来源以及发言者资料，当前消息是否构成诈骗或黑灰产推广？诈骗招揽与黑灰产引流属于违规；正常分享、反诈提醒、举报、求助和引用讨论应正常通过。姓名和简介作为辅助证据，结合当前消息的实际意图判断。"},
 		},
 		Base: Policy{Mode: "record", QueueLimit: 100, Rules: map[string]Rule{
-			"delete": {true, "violation", 0.95, 1, 0, "delete", 0},
-			"repeat": {true, "violation", 0.85, 3, 600, "mute", 600},
+			"delete": {Enabled: true, Question: "violation", Threshold: 0.95, Count: 1, Action: "delete"},
+			"repeat": {Enabled: true, Question: "violation", Threshold: 0.85, Count: 3, WindowSeconds: 600, Action: "mute", DurationSeconds: 600},
+			"ban":    {Target: "caller", Action: "ban", Count: 1, DurationSeconds: -1},
 		}},
 		Groups: map[string]json.RawMessage{},
 	}
@@ -179,6 +181,18 @@ func (c Config) validatePolicy(p Policy) error {
 	for id, r := range p.Rules {
 		if !identifier.MatchString(id) {
 			return fmt.Errorf("invalid rule name %q", id)
+		}
+		if r.Target == "caller" {
+			if r.Action != "ban" || r.Question != "" || r.Threshold != 0 || r.Count != 1 || r.WindowSeconds != 0 {
+				return fmt.Errorf("rule %s: caller target requires ban, count 1 and no question, threshold or window", id)
+			}
+			if r.DurationSeconds != -1 && (r.DurationSeconds < 60 || r.DurationSeconds > 31536000) {
+				return fmt.Errorf("rule %s: ban duration must be -1 or 60..31536000 seconds", id)
+			}
+			continue
+		}
+		if r.Target != "" && r.Target != "sender" {
+			return fmt.Errorf("rule %s: target must be sender or caller", id)
 		}
 		if r.Question == "" {
 			if p.Condition == "" || r.Threshold != 0 {
