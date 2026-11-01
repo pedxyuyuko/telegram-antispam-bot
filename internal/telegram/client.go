@@ -190,6 +190,24 @@ func (c *Client) Delete(ctx context.Context, chat int64, message int) error {
 	}
 	return c.safe(err)
 }
+
+// Ban accepts a zero time for an explicit permanent ban. Finite deadlines are
+// checked again at the API boundary so queued work cannot become permanent.
+func (c *Client) Ban(ctx context.Context, chat, user int64, until time.Time) error {
+	deadline := 0
+	if !until.IsZero() {
+		remaining := until.Unix() - time.Now().Unix()
+		if remaining < 30 || remaining > 366*24*60*60 {
+			return errors.New("ban deadline would imply a permanent restriction")
+		}
+		deadline = int(until.Unix())
+	}
+	ok, err := c.Bot.BanChatMember(ctx, &bot.BanChatMemberParams{ChatID: chat, UserID: user, UntilDate: deadline})
+	if err == nil && !ok {
+		err = errors.New("Telegram declined ban")
+	}
+	return c.safe(err)
+}
 func (c *Client) Mute(ctx context.Context, chat, user int64, until time.Time) error {
 	remaining := time.Until(until)
 	if remaining < 30*time.Second || remaining > 366*24*time.Hour {
