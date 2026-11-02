@@ -47,6 +47,17 @@ func (a *App) ProcessModel(ctx context.Context, now time.Time) (bool, error) {
 			return true, nil
 		}
 	}
+	cfg := a.Config.Snapshot()
+	cached, hit, err := a.Store.ApplyContentCache(ctx, *j, cfg.Model)
+	if err != nil {
+		return false, err
+	}
+	if hit {
+		if cached.Cache != nil {
+			debug(diagnostic, "content_cache.hit", "cache_id", cached.Cache.CacheID, "source_attempt", cached.Cache.SourceAttemptID, "model", cached.Cache.ModelID)
+		}
+		return true, nil
+	}
 	reused := len(j.State) > 0
 	var inferenceErr error
 	if !reused {
@@ -61,7 +72,6 @@ func (a *App) ProcessModel(ctx context.Context, now time.Time) (bool, error) {
 			debug(diagnostic, "context.failed", "error", inferenceErr)
 		}
 	}
-	cfg := a.Config.Snapshot()
 	var result decision.Result
 	if inferenceErr == nil {
 		debug(diagnostic, "context.ready", "reused", reused, "state_bytes", len(j.State))
@@ -138,7 +148,7 @@ func (a *App) ProcessAction(ctx context.Context) (bool, error) {
 		detail = "message has a newer version"
 		return finish()
 	}
-	if valid, reason, err := a.Store.BotActionCurrent(ctx, *intent); err != nil {
+	if valid, reason, err := a.Store.BotActionCurrent(ctx, *intent, cfg); err != nil {
 		return false, err
 	} else if !valid {
 		detail = reason
@@ -224,7 +234,7 @@ func (a *App) ProcessAction(ctx context.Context) (bool, error) {
 		detail = "message has a newer version"
 		return finish()
 	}
-	release, valid, reason, err := a.Store.GuardBotAction(ctx, *intent)
+	release, valid, reason, err := a.Store.GuardBotAction(ctx, *intent, fresh)
 	if err != nil {
 		return false, err
 	}

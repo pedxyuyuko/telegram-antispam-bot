@@ -71,6 +71,18 @@ func (s *Store) AddRevision(ctx context.Context, in Inbox, m *telegram.Message, 
 			report.Actions = blocked.Actions
 			report.LinkedActions = blocked.LinkedActions
 			job.Status = blocked.Status
+		} else {
+			cached, hit, err := applyContentCacheTx(ctx, tx, job, config.Model{Name: snapshot.ModelID, BaseURL: snapshot.ModelEndpoint})
+			if err != nil {
+				return ArchiveReport{}, err
+			}
+			if hit {
+				report.Status = cached.Status
+				report.Cache = cached.Cache
+				report.Actions = cached.Actions
+				report.LinkedActions = cached.LinkedActions
+				job.Status = cached.Status
+			}
 		}
 	}
 	linked, err := resolveInvocationsTx(ctx, tx, job)

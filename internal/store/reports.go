@@ -5,6 +5,7 @@ import "telegram-antispam-bot/internal/decision"
 // Reports describe committed outcomes for diagnostics. They never carry message
 // bodies, profile text, credentials, or the raw model response.
 type ArchiveReport struct {
+	Cache                               *ContentCacheHit
 	SkipReason                          string
 	BlacklistBotID, BlacklistGeneration int64
 	Actions                             []PlannedAction
@@ -42,6 +43,7 @@ type PlannedAction struct {
 }
 
 type FinishReport struct {
+	Cache         *ContentCacheHit
 	LinkedActions []LinkedAction
 	AttemptID     int64
 	Status        string

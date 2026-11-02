@@ -393,8 +393,11 @@ func (s *Store) blacklistGenerationCurrent(ctx context.Context, bot, generation 
 	return entry != nil && entry.Active && entry.Generation == generation, err
 }
 
-func (s *Store) checkBotAction(ctx context.Context, a Action) (bool, string, invocationChoice, error) {
+func (s *Store) checkBotAction(ctx context.Context, a Action, cfg *config.Config) (bool, string, invocationChoice, error) {
 	var none invocationChoice
+	if valid, reason, err := s.contentActionCurrent(ctx, a.RevisionID, a.ChatID, cfg); err != nil || !valid {
+		return valid, reason, none, err
+	}
 	switch a.EvidenceKind {
 	case "":
 		return true, "", none, nil
@@ -413,7 +416,7 @@ func (s *Store) checkBotAction(ctx context.Context, a Action) (bool, string, inv
 		if !invocationTargetEligible(*j, &target) {
 			return false, "invocation target changed", none, nil
 		}
-		rows, err := s.db.QueryContext(ctx, `SELECT i.source_action_id,i.bot_id,i.user_id,i.fingerprint,source.mode,source.status,coalesce(e.kind,''),coalesce(e.bot_id,0),coalesce(e.generation,0),r.snapshot
+		rows, err := s.db.QueryContext(ctx, `SELECT i.source_action_id,i.bot_id,i.user_id,i.fingerprint,source.mode,source.status,coalesce(e.kind,''),coalesce(e.bot_id,0),coalesce(e.generation,0),r.snapshot,source.revision_id
  FROM bot_invocation_actions l JOIN bot_invocations i ON i.source_action_id=l.source_action_id
  JOIN actions source ON source.id=i.source_action_id JOIN revisions r ON r.id=source.revision_id LEFT JOIN action_evidence e ON e.action_id=source.id
  WHERE l.target_action_id=? ORDER BY i.source_action_id DESC`, a.ID)
@@ -422,13 +425,14 @@ func (s *Store) checkBotAction(ctx context.Context, a Action) (bool, string, inv
 		}
 		type proof struct {
 			action, bot, user, sourceBot, generation int64
+			revision                                 int64
 			fingerprint, mode, status, kind          string
 			snapshot                                 []byte
 		}
 		var proofs []proof
 		for rows.Next() {
 			var p proof
-			if err := rows.Scan(&p.action, &p.bot, &p.user, &p.fingerprint, &p.mode, &p.status, &p.kind, &p.sourceBot, &p.generation, &p.snapshot); err != nil {
+			if err := rows.Scan(&p.action, &p.bot, &p.user, &p.fingerprint, &p.mode, &p.status, &p.kind, &p.sourceBot, &p.generation, &p.snapshot, &p.revision); err != nil {
 				rows.Close()
 				return false, "", none, err
 			}
@@ -442,6 +446,11 @@ func (s *Store) checkBotAction(ctx context.Context, a Action) (bool, string, inv
 		fingerprint := target.InvocationFingerprint()
 		for _, p := range proofs {
 			if p.user != a.UserID || p.fingerprint != fingerprint || p.mode != "enforce" || p.status != "succeeded" {
+				continue
+			}
+			if valid, _, err := s.contentActionCurrent(ctx, p.revision, a.ChatID, cfg); err != nil {
+				return false, "", none, err
+			} else if !valid {
 				continue
 			}
 			if a.Kind == "ban" {
@@ -475,16 +484,21 @@ func (s *Store) checkBotAction(ctx context.Context, a Action) (bool, string, inv
 	}
 }
 
-func (s *Store) BotActionCurrent(ctx context.Context, a Action) (bool, string, error) {
-	valid, reason, _, err := s.checkBotAction(ctx, a)
+func (s *Store) BotActionCurrent(ctx context.Context, a Action, current ...config.Config) (bool, string, error) {
+	var cfg *config.Config
+	if len(current) > 0 {
+		cfg = &current[0]
+	}
+	valid, reason, _, err := s.checkBotAction(ctx, a, cfg)
 	return valid, reason, err
 }
 
 // GuardBotAction is acquired after network preflight and held through dispatch
 // and outcome persistence. Owner list changes serialize at this boundary.
-func (s *Store) GuardBotAction(ctx context.Context, a Action) (func(), bool, string, error) {
-	if a.EvidenceKind == "" {
-		return func() {}, true, "", nil
+func (s *Store) GuardBotAction(ctx context.Context, a Action, configurations ...config.Config) (func(), bool, string, error) {
+	var cfg *config.Config
+	if len(configurations) > 0 {
+		cfg = &configurations[0]
 	}
 	s.botDispatchMu.RLock()
 	fail := func(reason string, err error) (func(), bool, string, error) {
@@ -498,7 +512,7 @@ func (s *Store) GuardBotAction(ctx context.Context, a Action) (func(), bool, str
 	if !current {
 		return fail("message has a newer version", nil)
 	}
-	valid, reason, choice, err := s.checkBotAction(ctx, a)
+	valid, reason, choice, err := s.checkBotAction(ctx, a, cfg)
 	if err != nil || !valid {
 		return fail(reason, err)
 	}

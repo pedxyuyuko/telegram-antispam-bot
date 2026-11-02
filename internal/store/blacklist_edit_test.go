@@ -174,7 +174,7 @@ func TestVersionThreeBlacklistMetadataMigrationPreservesRows(t *testing.T) {
 	var version, count int
 	s.db.QueryRow(`PRAGMA user_version`).Scan(&version)
 	s.db.QueryRow(`SELECT count(*) FROM bot_blacklist_events WHERE detail=''`).Scan(&count)
-	if version != 5 || count != 1 {
+	if version != 6 || count != 1 {
 		t.Fatalf("migration version=%d preserved_events=%d", version, count)
 	}
 }

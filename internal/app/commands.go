@@ -125,12 +125,15 @@ func (a *App) ProcessInbox(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	archived, err := a.Store.AddRevision(ctx, *in, m, store.Snapshot{Policy: policy, Questions: questions, SkipReason: skipReason}, status)
+	archived, err := a.Store.AddRevision(ctx, *in, m, store.Snapshot{Policy: policy, Questions: questions, SkipReason: skipReason, ModelID: cfg.Model.Name, ModelEndpoint: cfg.Model.BaseURL}, status)
 	if err != nil {
 		return false, err
 	}
 	diagnostic = diagnostic.With("revision", archived.ID)
 	debug(diagnostic, "message.archived", "status", archived.Status, "skip_reason", archived.SkipReason, "duplicate", archived.Duplicate, "mode", policy.Mode, "question_count", len(questions), "queue_limit", policy.QueueLimit)
+	if cached := archived.Cache; cached != nil {
+		debug(diagnostic, "content_cache.hit", "cache_id", cached.CacheID, "source_attempt", cached.SourceAttemptID, "model", cached.ModelID)
+	}
 	if archived.BlacklistBotID > 0 {
 		debug(diagnostic, "blacklist.matched", "bot_id", archived.BlacklistBotID, "generation", archived.BlacklistGeneration)
 	}

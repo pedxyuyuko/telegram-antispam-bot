@@ -79,9 +79,21 @@ func (s *Store) finish(ctx context.Context, j Job, result decision.Result, infer
 		}
 		return tx.Commit()
 	}
-	if status != "running" {
+	if err := finishSuccessTx(ctx, tx, j, result, evaluation, now, report, nil); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func finishSuccessTx(ctx context.Context, tx *sql.Tx, j Job, result decision.Result, evaluation decision.Evaluation, now time.Time, report *FinishReport, cached *contentEntry) error {
+	var status string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM revisions WHERE id=?`, j.ID).Scan(&status); err != nil {
+		return err
+	}
+	report.Status = status
+	if status != "running" && !(cached != nil && status == "pending") {
 		report.Reason = "revision_no_longer_running"
-		return tx.Commit()
+		return nil
 	}
 	var latest int64
 	if err := tx.QueryRowContext(ctx, `SELECT max(id) FROM revisions WHERE chat_id=? AND message_id=?`, j.ChatID, j.MessageID).Scan(&latest); err != nil {
@@ -93,7 +105,7 @@ func (s *Store) finish(ctx context.Context, j Job, result decision.Result, infer
 		}
 		report.Status = "superseded"
 		report.Reason = "newer_revision_exists"
-		return tx.Commit()
+		return nil
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE revisions SET status='succeeded' WHERE id=?`, j.ID); err != nil {
 		return err
@@ -102,7 +114,20 @@ func (s *Store) finish(ctx context.Context, j Job, result decision.Result, infer
 	report.Status = "succeeded"
 	report.Reason = "condition_" + string(evaluation.Condition)
 	if evaluation.Condition != expression.True {
-		return tx.Commit()
+		return nil
+	}
+	if cached != nil {
+		raw, err := json.Marshal(evaluation)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO content_cache_matches(revision_id,cache_id,source_attempt_id,evaluation,created_at) VALUES(?,?,?,?,?)`, j.ID, cached.ID, cached.SourceAttemptID, string(raw), now.UnixMilli()); err != nil {
+			return err
+		}
+		report.Cache = &ContentCacheHit{CacheID: cached.ID, SourceAttemptID: cached.SourceAttemptID, ModelID: cached.ModelID}
+		report.Reason = "content_cache"
+	} else if err := learnContentTx(ctx, tx, j, result, report.AttemptID, now); err != nil {
+		return err
 	}
 	ids := make([]string, 0, len(policy.Rules))
 	for id := range policy.Rules {
@@ -210,7 +235,7 @@ func (s *Store) finish(ctx context.Context, j Job, result decision.Result, infer
 			}
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (s *Store) TakeAction(ctx context.Context) (*Action, error) {

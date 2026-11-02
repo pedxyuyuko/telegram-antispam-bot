@@ -31,9 +31,11 @@ type Inbox struct {
 	ReceivedAt int64
 }
 type Snapshot struct {
-	Policy     config.Policy              `json:"policy"`
-	Questions  map[string]config.Question `json:"questions"`
-	SkipReason string                     `json:"skip_reason,omitempty"`
+	ModelID       string                     `json:"model_id,omitempty"`
+	ModelEndpoint string                     `json:"model_endpoint,omitempty"`
+	Policy        config.Policy              `json:"policy"`
+	Questions     map[string]config.Question `json:"questions"`
+	SkipReason    string                     `json:"skip_reason,omitempty"`
 }
 type Job struct {
 	ID         int64
@@ -135,7 +137,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if version > 5 {
+	if version > 6 {
 		db.Close()
 		return nil, fmt.Errorf("unsupported database schema version %d", version)
 	}
@@ -156,6 +158,11 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	if err := migrateBlacklistMetadata(tx); err != nil {
+		tx.Rollback()
+		db.Close()
+		return nil, err
+	}
+	if _, err := tx.Exec(contentCacheSchema); err != nil {
 		tx.Rollback()
 		db.Close()
 		return nil, err
