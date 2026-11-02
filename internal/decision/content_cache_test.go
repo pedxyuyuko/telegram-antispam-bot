@@ -70,3 +70,20 @@ func TestContentPolicyKeyIsolatesJudgmentChanges(t *testing.T) {
 		t.Fatal("question edit reused old key")
 	}
 }
+
+func TestContentProjectionPreservesFloatingPointScoringOrder(t *testing.T) {
+	q, p := contentPolicy()
+	p.Condition = "score >= 0"
+	p.Scoring.Rules = []config.ScoreRule{
+		{Name: "first", When: "p.content.ad > 0.8", Add: 1e9},
+		{Name: "unknown_penalty", When: "p.profile.ad > 0.8", Add: -1e9},
+		{Name: "last", When: "p.content.ad > 0.8", Add: -1e-8},
+	}
+	_, ok, err := ContentProjection(q, p, Result{Probabilities: map[string]float64{"content.ad": .99, "profile.ad": .01}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("reordered interval arithmetic hid a failing profile-dependent score")
+	}
+}

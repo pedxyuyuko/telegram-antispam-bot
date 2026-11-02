@@ -56,8 +56,9 @@ func ContentProjection(questions map[string]config.Question, p config.Policy, re
 	if err != nil {
 		return projected, false, err
 	}
-	low, high := e.Score, e.Score
+	low, high := float64(0), float64(0)
 	if p.Scoring != nil {
+		low, high = p.Scoring.Initial, p.Scoring.Initial
 		for _, rule := range p.Scoring.Rules {
 			program, err := expression.Compile(rule.When, variables, false)
 			if err != nil {
@@ -69,6 +70,9 @@ func ContentProjection(questions map[string]config.Question, p config.Policy, re
 				} else {
 					high += rule.Add
 				}
+			} else if program.Eval(e.Values, 0) == expression.True {
+				low += rule.Add
+				high += rule.Add
 			}
 		}
 	}
