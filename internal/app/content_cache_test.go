@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"telegram-antispam-bot/internal/config"
+	"telegram-antispam-bot/internal/decision"
 	"telegram-antispam-bot/internal/store"
 	"telegram-antispam-bot/internal/telegram"
 )
@@ -393,5 +395,43 @@ func TestVersionFiveMigrationPreservesHistoryAndStartsWithEmptyCache(t *testing.
 	}
 	if string(before.Raw) != string(after.Raw) || scalar(t, path, `SELECT count(*) FROM attempts`) != 1 || scalar(t, path, `SELECT count(*) FROM actions`) != 1 || scalar(t, path, `SELECT count(*) FROM content_cache`) != 0 {
 		t.Fatal("migration changed existing evidence or created retrospective cache entries")
+	}
+}
+
+func TestFailedAndStaleModelResultsCannotPublishContentCache(t *testing.T) {
+	for _, scenario := range []string{"failed", "edited", "evicted"} {
+		t.Run(scenario, func(t *testing.T) {
+			a, path, _, _ := contentCacheFixture(t, "record", false)
+			deliver(t, a, 1, adMessage(1, 200))
+			j, err := a.Store.Claim(context.Background(), time.Now())
+			if err != nil || j == nil {
+				t.Fatalf("claim=%+v %v", j, err)
+			}
+			var failure error
+			switch scenario {
+			case "failed":
+				failure = errors.New("model unavailable")
+			case "edited":
+				m := adMessage(1, 200)
+				m.Text = "newer version"
+				m.EditDate = m.Date + 1
+				deliver(t, a, 2, m)
+			case "evicted":
+				if err := a.Config.Set(nil, "queue_limit", json.RawMessage(`1`)); err != nil {
+					t.Fatal(err)
+				}
+				m := message(50, "ordinary")
+				m.ID = 2
+				deliver(t, a, 2, m)
+			}
+			model := a.Config.Snapshot().Model
+			result := decision.Result{ModelID: model.Name, ModelEndpoint: model.BaseURL, Probabilities: map[string]float64{"content.ad": .99, "profile.ad": .01}}
+			if _, err := a.Store.Finish(context.Background(), *j, result, failure, time.Now(), 10); err != nil {
+				t.Fatal(err)
+			}
+			if scalar(t, path, `SELECT count(*) FROM content_cache`) != 0 || scalar(t, path, `SELECT count(*) FROM attempts`) != 1 {
+				t.Fatal("failed/stale result entered cache or attempt was lost")
+			}
+		})
 	}
 }
