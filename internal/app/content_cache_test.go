@@ -435,3 +435,33 @@ func TestFailedAndStaleModelResultsCannotPublishContentCache(t *testing.T) {
 		})
 	}
 }
+
+func TestContentCacheLogsIdentifyReuseAndPlannedAction(t *testing.T) {
+	for _, queued := range []bool{false, true} {
+		t.Run(map[bool]string{false: "admission", true: "worker"}[queued], func(t *testing.T) {
+			a, _, _, _ := contentCacheFixture(t, "record", false)
+			if err := a.Config.Set(nil, "debug", json.RawMessage(`true`)); err != nil {
+				t.Fatal(err)
+			}
+			log := captureDebug(a)
+			deliver(t, a, 1, adMessage(1, 200))
+			if queued {
+				deliver(t, a, 2, adMessage(2, 201))
+			}
+			runModel(t, a, time.Now())
+			log.Reset()
+			if queued {
+				runModel(t, a, time.Now())
+			} else {
+				deliver(t, a, 2, adMessage(2, 201))
+			}
+			plans := events(t, log, "action.planned")
+			if len(events(t, log, "content_cache.hit")) != 1 || len(plans) != 1 || plans[0]["source"] != "content_cache" {
+				t.Fatalf("cache trace missing or mislabeled: %s", log.String())
+			}
+			if len(events(t, log, "model.started")) != 0 {
+				t.Fatal("cache reported a fresh model request")
+			}
+		})
+	}
+}

@@ -138,7 +138,11 @@ func (a *App) ProcessInbox(ctx context.Context) (bool, error) {
 		debug(diagnostic, "blacklist.matched", "bot_id", archived.BlacklistBotID, "generation", archived.BlacklistGeneration)
 	}
 	for _, action := range archived.Actions {
-		debug(diagnostic, "action.planned", "action_id", action.ID, "action", action.Kind, "rule", action.RuleID, "status", action.Status, "source", "bot_blacklist")
+		source := "bot_blacklist"
+		if archived.Cache != nil {
+			source = "content_cache"
+		}
+		debug(diagnostic, "action.planned", "action_id", action.ID, "action", action.Kind, "rule", action.RuleID, "status", action.Status, "source", source)
 	}
 	for _, link := range archived.LinkedActions {
 		debug(diagnostic, "invocation.planned", "target_message", link.MessageID, "target_revision", link.RevisionID, "action_id", link.ActionID, "source_action", link.SourceActionID, "action", link.Kind)

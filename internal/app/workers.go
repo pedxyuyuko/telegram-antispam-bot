@@ -56,6 +56,12 @@ func (a *App) ProcessModel(ctx context.Context, now time.Time) (bool, error) {
 		if cached.Cache != nil {
 			debug(diagnostic, "content_cache.hit", "cache_id", cached.Cache.CacheID, "source_attempt", cached.Cache.SourceAttemptID, "model", cached.Cache.ModelID)
 		}
+		for _, action := range cached.Actions {
+			debug(diagnostic, "action.planned", "action_id", action.ID, "action", action.Kind, "rule", action.RuleID, "status", action.Status, "source", "content_cache")
+		}
+		for _, link := range cached.LinkedActions {
+			debug(diagnostic, "invocation.planned", "target_message", link.MessageID, "target_revision", link.RevisionID, "action_id", link.ActionID, "source_action", link.SourceActionID, "action", link.Kind)
+		}
 		return true, nil
 	}
 	reused := len(j.State) > 0
