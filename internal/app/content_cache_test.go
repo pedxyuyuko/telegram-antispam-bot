@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -203,5 +204,194 @@ func TestModelChangeCancelsQueuedCachedPunishment(t *testing.T) {
 	drainActions(t, a, path)
 	if deletes.Load() != 1 || scalar(t, path, `SELECT count(*) FROM actions WHERE message_id=2 AND status='skipped'`) != 1 {
 		t.Fatal("old model cache dispatched after model change")
+	}
+}
+
+func TestCachedAdUsesThisInvocationsCallerAndLearnsNewBot(t *testing.T) {
+	for _, mode := range []string{"record", "enforce"} {
+		t.Run(mode, func(t *testing.T) {
+			a, path, calls, _ := contentCacheFixture(t, mode, false)
+			enableBan(t, a, -1)
+			for i := 0; i < 2; i++ {
+				caller := message(int64(50+i), "call bot")
+				caller.ID = i*2 + 1
+				deliver(t, a, int64(caller.ID), caller)
+				drainModels(t, a)
+				ad := guestReply(caller, i*2+2, int64(200+i))
+				ad.Text = "same advertisement"
+				deliver(t, a, int64(ad.ID), ad)
+				drainModels(t, a)
+				drainActions(t, a, path)
+			}
+			if calls.Load() != 3 || scalar(t, path, `SELECT count(*) FROM content_cache_matches`) != 1 {
+				t.Fatal("duplicate guest ad missed cache")
+			}
+			status := "recorded"
+			if mode == "enforce" {
+				status = "succeeded"
+			}
+			if scalar(t, path, `SELECT count(*) FROM actions WHERE kind='ban' AND status='`+status+`' AND ((message_id=1 AND user_id=50) OR (message_id=3 AND user_id=51))`) != 2 {
+				t.Fatal("cached ad lost current caller or reused source caller")
+			}
+			entry, err := a.Store.BotBlacklist(context.Background(), 201)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "enforce" && (entry == nil || !entry.Active) {
+				t.Fatal("cached successful deletion did not learn new bot")
+			}
+			if mode == "record" && entry != nil {
+				t.Fatal("record cache match learned blacklist")
+			}
+		})
+	}
+}
+
+func TestCachedInvocationActionsRecheckSourceModel(t *testing.T) {
+	a, path, _, _ := contentCacheFixture(t, "enforce", false)
+	enableBan(t, a, -1)
+	deliver(t, a, 1, adMessage(1, 200))
+	drainModels(t, a)
+	drainActions(t, a, path)
+	caller := message(50, "call bot")
+	caller.ID = 2
+	deliver(t, a, 2, caller)
+	drainModels(t, a)
+	ad := guestReply(caller, 3, 201)
+	ad.Text = "same advertisement"
+	deliver(t, a, 3, ad)
+	doAction(t, a)
+	c := a.Config.Snapshot()
+	c.Model.Name = "new-model"
+	saveScoringConfig(t, a, path, c)
+	drainActions(t, a, path)
+	if scalar(t, path, `SELECT count(*) FROM actions WHERE message_id=2 AND status='skipped'`) != 2 {
+		t.Fatal("cached invocation source survived model change")
+	}
+}
+
+func TestCachedActionVersionAndRoleProtectionsRemainActive(t *testing.T) {
+	for _, change := range []string{"edit", "owner", "record"} {
+		t.Run(change, func(t *testing.T) {
+			a, path, _, deletes := contentCacheFixture(t, "enforce", false)
+			deliver(t, a, 1, adMessage(1, 200))
+			drainModels(t, a)
+			drainActions(t, a, path)
+			target := adMessage(2, 201)
+			deliver(t, a, 2, target)
+			switch change {
+			case "edit":
+				target.Text = "ordinary discussion"
+				target.EditDate = target.Date + 1
+				deliver(t, a, 3, target)
+			case "owner":
+				c := a.Config.Snapshot()
+				c.OwnerIDs = append(c.OwnerIDs, 201)
+				saveScoringConfig(t, a, path, c)
+			case "record":
+				if err := a.Config.Set(nil, "mode", json.RawMessage(`"record"`)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			drainActions(t, a, path)
+			if deletes.Load() != 1 {
+				t.Fatal("cached action bypassed current protection")
+			}
+		})
+	}
+}
+
+func TestCacheNamespaceIsRecheckedAfterMembershipWait(t *testing.T) {
+	a, path, _, deletes := contentCacheFixture(t, "enforce", false)
+	deliver(t, a, 1, adMessage(1, 200))
+	drainModels(t, a)
+	drainActions(t, a, path)
+	deliver(t, a, 2, adMessage(2, 201))
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var once sync.Once
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "getChatMember") {
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+			w.Write([]byte(`{"ok":true,"result":{"status":"member","user":{"id":201,"first_name":"bot"}}}`))
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "deleteMessage") {
+			deletes.Add(1)
+		}
+		w.Write([]byte(`{"ok":true,"result":true}`))
+	}))
+	t.Cleanup(s.Close)
+	t.Cleanup(func() { once.Do(func() { close(release) }) })
+	cfg := a.Config.Snapshot().Telegram
+	cfg.APIBase = s.URL
+	tg, err := telegram.New(cfg, "123:offline", s.Client(), 0, a.Log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tg.Me = a.Telegram.Me
+	a.Telegram = tg
+	done := make(chan error, 1)
+	go func() { _, err := a.ProcessAction(context.Background()); done <- err }()
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("membership did not start")
+	}
+	c := a.Config.Snapshot()
+	c.Model.Name = "new-model"
+	saveScoringConfig(t, a, path, c)
+	once.Do(func() { close(release) })
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("action did not finish")
+	}
+	if deletes.Load() != 1 {
+		t.Fatal("stale cache crossed final dispatch check")
+	}
+}
+
+func TestVersionFiveMigrationPreservesHistoryAndStartsWithEmptyCache(t *testing.T) {
+	a, path, _, _ := contentCacheFixture(t, "record", false)
+	deliver(t, a, 1, adMessage(1, 200))
+	drainModels(t, a)
+	before, err := a.Store.Revision(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`DROP TABLE content_cache_matches; DROP TABLE content_cache; PRAGMA user_version=5;`)
+	db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	after, err := s.Revision(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before.Raw) != string(after.Raw) || scalar(t, path, `SELECT count(*) FROM attempts`) != 1 || scalar(t, path, `SELECT count(*) FROM actions`) != 1 || scalar(t, path, `SELECT count(*) FROM content_cache`) != 0 {
+		t.Fatal("migration changed existing evidence or created retrospective cache entries")
 	}
 }
