@@ -22,6 +22,8 @@ import (
 type Client struct{ HTTP *http.Client }
 
 type Result struct {
+	ModelID       string
+	ModelEndpoint string
 	Request       []byte
 	Response      []byte
 	Probabilities map[string]float64
@@ -39,6 +41,7 @@ type Answer struct {
 }
 
 func (c *Client) Evaluate(ctx context.Context, cfg config.Model, questions map[string]config.Question, state json.RawMessage) (result Result, err error) {
+	result.ModelID, result.ModelEndpoint = cfg.Name, strings.TrimRight(cfg.BaseURL, "/")
 	start := time.Now()
 	defer func() { result.Duration = time.Since(start) }()
 	result.Request, err = json.Marshal(struct {

@@ -34,6 +34,9 @@ func TestSystemOneNoulContractAndFullEvidence(t *testing.T) {
 	if result.Probabilities["spam"] != .93 || !strings.Contains(string(result.Response), `"extra":"keep"`) {
 		t.Fatalf("lost evidence: %+v", result)
 	}
+	if result.ModelID != "m" || result.ModelEndpoint != s.URL {
+		t.Fatal("decision lost its model/cache namespace")
+	}
 	if len(payload) != 3 || string(payload["model"]) != `"m"` || !strings.Contains(string(result.Request), `"text":"hello"`) {
 		t.Fatalf("wrong protocol: %s", result.Request)
 	}
