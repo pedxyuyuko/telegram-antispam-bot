@@ -93,6 +93,9 @@ func (a *App) ProcessInbox(ctx context.Context) (bool, error) {
 		debug(a.diagnostics(0, "update", in.ID), "update.ignored", "reason", "invalid_update")
 		return true, a.Store.MarkInbox(ctx, in.ID, "invalid update: "+err.Error())
 	}
+	if u.ChatMember != nil {
+		return a.processMembership(ctx, *in, *u.ChatMember)
+	}
 	m := u.Current()
 	if m == nil {
 		debug(a.diagnostics(0, "update", in.ID), "update.ignored", "reason", "unsupported_update")
@@ -116,6 +119,8 @@ func (a *App) ProcessInbox(ctx context.Context) (bool, error) {
 	status, skipReason := "pending", ""
 	if authorized {
 		status = "command"
+	} else if len(m.NewChatMembers) > 0 || m.LeftChatMember != nil {
+		status, skipReason = "ignored", "membership_service"
 	} else if skipReason = a.exemption(ctx, m, checkedRole, diagnostic); skipReason != "" {
 		status = "ignored"
 	}

@@ -17,7 +17,11 @@ func (a *App) joinCommand(ctx context.Context, m *telegram.Message, args string)
 	fields := strings.Fields(args)
 	if len(fields) == 1 && fields[0] == "status" {
 		p := a.Config.Snapshot().ForJoinGroup(m.Chat.ID)
-		raw, _ := json.MarshalIndent(p, "", "  ")
+		stats, err := a.Store.JoinStats(ctx, m.Chat.ID)
+		if err != nil {
+			return "", err
+		}
+		raw, _ := json.MarshalIndent(map[string]any{"effective": p, "arrivals": stats}, "", "  ")
 		return "入群检测有效配置：\n" + string(raw), nil
 	}
 	var path string
@@ -36,6 +40,9 @@ func (a *App) joinCommand(ctx context.Context, m *telegram.Message, args string)
 	}
 	if err := a.Config.SetJoin(&m.Chat.ID, path, value); err != nil {
 		return "入群检测配置修改失败：" + err.Error(), nil
+	}
+	if err := a.Store.ResizeJoin(ctx, a.Config.Snapshot()); err != nil {
+		return "", err
 	}
 	p := a.Config.Snapshot().ForJoinGroup(m.Chat.ID)
 	a.Log.Info("join configuration updated", "event", "join.config_updated", "chat", m.Chat.ID, "actor", m.UserID(), "setting", path, "enabled", p.Enabled, "mode", p.Mode)

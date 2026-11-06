@@ -40,6 +40,8 @@ type Message struct {
 	CaptionEntities    []Entity        `json:"caption_entities,omitempty"`
 	Reply              *Message        `json:"reply_to_message,omitempty"`
 	GuestBotCallerUser *User           `json:"guest_bot_caller_user,omitempty"`
+	NewChatMembers     []User          `json:"new_chat_members,omitempty"`
+	LeftChatMember     *User           `json:"left_chat_member,omitempty"`
 	Raw                json.RawMessage `json:"-"`
 }
 

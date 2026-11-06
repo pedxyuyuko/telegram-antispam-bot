@@ -79,5 +79,5 @@ func (a *App) resizeQueues(ctx context.Context, update, sourceChat int64) error 
 	for _, change := range changes {
 		debug(a.diagnostics(change.ChatID, "update", update, "source_chat", sourceChat), "queue.resized", "queue_limit", change.Limit, "evicted", change.Evicted, "reason", "configuration_changed")
 	}
-	return nil
+	return a.Store.ResizeJoin(ctx, a.Config.Snapshot())
 }

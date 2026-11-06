@@ -87,6 +87,9 @@ func run(ctx context.Context, args []string, out, logs io.Writer) (err error) {
 	if err != nil {
 		return err
 	}
+	if err := s.ResizeJoin(ctx, c); err != nil {
+		return err
+	}
 	lastID, err := s.LastUpdateID(ctx)
 	if err != nil {
 		return err
