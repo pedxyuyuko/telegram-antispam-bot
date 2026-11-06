@@ -185,3 +185,14 @@ func TestSegmentedFingerprintKeepsPureAdCacheIndependentOfCaller(t *testing.T) {
 		t.Fatal("context format failed to isolate old cache")
 	}
 }
+
+func TestReferenceDiscoveryValidatesTheWholeURLHost(t *testing.T) {
+	for _, text := range []string{"https://evil-t.me/alice", "https://evil-telegram.me/alice", "https://evil.test/?next=https://t.me/alice", "evil-t.me/alice", "https://中t.me/alice"} {
+		if refs := ReferencesInText(text); len(refs) != 0 {
+			t.Fatalf("foreign URL produced Telegram reference: %s %+v", text, refs)
+		}
+	}
+	if refs := ReferencesInText("进群 https://t.me/alice"); len(refs) != 1 || refs[0].Username != "alice" {
+		t.Fatal("valid Telegram link lost")
+	}
+}

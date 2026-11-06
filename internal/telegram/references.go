@@ -20,7 +20,7 @@ type ReferenceProfile struct {
 }
 
 var referenceUsername = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,31}$`)
-var referenceTokens = regexp.MustCompile(`(?i)(?:https?://)?(?:t\.me|telegram\.me)/[^\s<>"']+|@[A-Za-z][A-Za-z0-9_]{0,31}`)
+var referenceTokens = regexp.MustCompile(`(?i)https?://[^\s<>"']+|(?:t\.me|telegram\.me)/[^\s<>"']+|@[A-Za-z][A-Za-z0-9_]{0,31}`)
 
 // ParseReference accepts Telegram usernames and public chat/message links.
 // Invite links remain explicit unsupported references for Bot API-only lookup.
@@ -129,7 +129,7 @@ func textSpans(text string, entities []Entity) []messageSpan {
 		start, end := match[0], match[1]
 		if start > 0 {
 			previous := text[start-1]
-			if previous >= 'A' && previous <= 'Z' || previous >= 'a' && previous <= 'z' || previous >= '0' && previous <= '9' || strings.ContainsRune("_@./:", rune(previous)) {
+			if previous >= 'A' && previous <= 'Z' || previous >= 'a' && previous <= 'z' || previous >= '0' && previous <= '9' || strings.ContainsRune("_@./:-", rune(previous)) {
 				continue
 			}
 		}
