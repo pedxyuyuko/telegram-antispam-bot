@@ -115,7 +115,10 @@
         "rules": [{"name": "入群资料宣传金钱或色情", "when": "p.join.promotion >= 0.85 && (p.join.money >= 0.85 || p.join.sexual >= 0.85)", "add": 100}]
       },
       "condition": "score >= 100",
-      "rules": {"remove": {"enabled": true, "count": 1, "action": "kick"}}
+      "rules": {
+        "remove": {"enabled": true, "count": 1, "action": "kick"},
+        "delete_join_message": {"enabled": true, "count": 1, "action": "delete"}
+      }
     },
     "groups": {"-1001234567890": {"enabled": false, "mode": "record"}}
   },

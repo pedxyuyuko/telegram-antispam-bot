@@ -130,6 +130,9 @@ func TestExampleJoinGateStartsDisabledAndScoresIndependentProfileAnswers(t *test
 	if p.Enabled || p.Mode != "record" {
 		t.Fatal("example enables join punishment")
 	}
+	if r := p.Rules["delete_join_message"]; !r.Enabled || r.Action != "delete" || r.Count != 1 {
+		t.Fatal("example lacks matched join-message cleanup")
+	}
 	q, err := c.SelectedQuestions(p.Policy)
 	if err != nil || len(q) != 4 {
 		t.Fatal("join question selection missing")
