@@ -55,9 +55,10 @@ func (m *Message) UnmarshalJSON(raw []byte) error {
 }
 
 type Update struct {
-	ID      int64    `json:"update_id"`
-	Message *Message `json:"message,omitempty"`
-	Edited  *Message `json:"edited_message,omitempty"`
+	ID         int64             `json:"update_id"`
+	Message    *Message          `json:"message,omitempty"`
+	Edited     *Message          `json:"edited_message,omitempty"`
+	ChatMember *MembershipUpdate `json:"chat_member,omitempty"`
 }
 
 func Parse(raw []byte) (Update, error) {
