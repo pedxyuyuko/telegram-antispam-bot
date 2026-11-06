@@ -294,3 +294,28 @@ func TestPendingMemberPermissionChangePreservesJoinEpisode(t *testing.T) {
 		})
 	}
 }
+
+func TestJoinDeletionRuleCannotBecomeMemberKick(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	snap := joinSnapshot("enforce")
+	snap.Policy.Rules["delete_join_message"] = config.Rule{Enabled: true, Count: 1, Action: "delete"}
+	addMember(t, s, 1, -100, 50, "left", "member", snap)
+	j := claimJoin(t, s)
+	if _, err := s.FinishJoin(ctx, *j, joinResult(1, 1, 0), nil, testNow, 10); err != nil {
+		t.Fatal(err)
+	}
+	a, err := s.TakeJoinAction(ctx)
+	if err != nil || a == nil || a.RuleID != "remove" || a.Rule.Action != "kick" {
+		t.Fatalf("deletion rule became member removal: %+v %v", a, err)
+	}
+	snap.Policy.Rules["remove"] = config.Rule{Enabled: false, Count: 1, Action: "kick"}
+	addMember(t, s, 2, -100, 51, "left", "member", snap)
+	j = claimJoin(t, s)
+	if _, err := s.FinishJoin(ctx, *j, joinResult(1, 1, 0), nil, testNow, 10); err != nil {
+		t.Fatal(err)
+	}
+	if a, err := s.TakeJoinAction(ctx); err != nil || a != nil {
+		t.Fatal("deletion-only policy removed a member")
+	}
+}

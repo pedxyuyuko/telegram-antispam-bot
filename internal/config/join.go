@@ -7,7 +7,8 @@ import (
 )
 
 // JoinPolicy is a separate policy namespace for one member's arrival. It shares
-// question/scoring semantics with messages, while restricting actions to removal.
+// question/scoring semantics with messages, with separate member-removal and
+// matched join-service-message deletion actions.
 type JoinPolicy struct {
 	Policy
 	Enabled bool   `json:"enabled"`
@@ -23,7 +24,7 @@ func DefaultJoinPolicy() JoinPolicy {
 	return JoinPolicy{Trigger: "member_joined", Policy: Policy{
 		Mode: "record", QueueLimit: 100, Questions: []string{"join.*"}, MinConfidence: .75, OnLowConfidence: "abstain_question",
 		Scoring: &Scoring{Rules: []ScoreRule{{Name: "入群资料宣传金钱或色情", When: "p.join.promotion >= 0.85 && (p.join.money >= 0.85 || p.join.sexual >= 0.85)", Add: 100}}}, Condition: "score >= 100",
-		Rules: map[string]Rule{"remove": {Enabled: true, Count: 1, Action: "kick"}},
+		Rules: map[string]Rule{"remove": {Enabled: true, Count: 1, Action: "kick"}, "delete_join_message": {Enabled: true, Count: 1, Action: "delete"}},
 	}}
 }
 
@@ -60,8 +61,8 @@ func (c Config) validateJoinPolicy(p JoinPolicy) error {
 		return err
 	}
 	for id, r := range p.Rules {
-		if r.Action != "kick" || r.Target != "" || r.Count != 1 || r.WindowSeconds != 0 || r.Question != "" || r.Threshold != 0 || r.DurationSeconds != 0 {
-			return fmt.Errorf("rule %s: join gate requires kick, count 1 and the final condition", id)
+		if (r.Action != "kick" && r.Action != "delete") || r.Target != "" || r.Count != 1 || r.WindowSeconds != 0 || r.Question != "" || r.Threshold != 0 || r.DurationSeconds != 0 {
+			return fmt.Errorf("rule %s: join gate requires kick or delete, count 1 and the final condition", id)
 		}
 	}
 	return nil

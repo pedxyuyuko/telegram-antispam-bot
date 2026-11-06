@@ -154,3 +154,20 @@ func TestJoinDispatchSerializesConfigChangesThroughSend(t *testing.T) {
 		t.Fatal("disable was lost after dispatch finished")
 	}
 }
+
+func TestJoinDeletionRuleIsIndependentOfMemberRemoval(t *testing.T) {
+	raw := strings.Replace(joinConfigJSON(), `"base":{"enabled":true}`, `"base":{"enabled":true,"rules":{"remove":{"enabled":false,"count":1,"action":"kick"},"delete_join_message":{"enabled":true,"count":1,"action":"delete"}}}`, 1)
+	c, err := Decode([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := c.ForJoinGroup(-200)
+	if p.Rules["remove"].Enabled || !p.Rules["delete_join_message"].Enabled || p.Rules["delete_join_message"].Action != "delete" {
+		t.Fatal("join deletion changed member-removal rule")
+	}
+	for _, bad := range []string{`"action":"mute"`, `"action":"delete","target":"sender"`, `"action":"delete","duration_seconds":60`} {
+		if _, err := Decode([]byte(strings.Replace(raw, `"action":"delete"`, bad, 1))); err == nil {
+			t.Fatalf("accepted invalid cleanup rule: %s", bad)
+		}
+	}
+}

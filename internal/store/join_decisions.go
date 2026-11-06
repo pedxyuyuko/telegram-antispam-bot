@@ -121,7 +121,7 @@ func (s *Store) FinishJoin(ctx context.Context, j JoinJob, result decision.Resul
 	sort.Strings(ids)
 	for _, id := range ids {
 		rule := j.Snapshot.Policy.Rules[id]
-		if !rule.Enabled {
+		if !rule.Enabled || rule.Action != "kick" {
 			continue
 		}
 		status := "recorded"
