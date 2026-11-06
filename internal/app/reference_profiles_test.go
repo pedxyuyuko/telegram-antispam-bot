@@ -208,3 +208,18 @@ func TestReferenceExpansionStopsAtTheRequestedChatProfile(t *testing.T) {
 		})
 	}
 }
+
+func TestExhaustedReferenceBudgetStaysLocalToMessage(t *testing.T) {
+	a, _ := appFixture(t, "member")
+	var bio atomic.Value
+	bio.Store("description")
+	calls := referenceGateway(t, a, &bio)
+	budget, cancel := context.WithCancel(context.Background())
+	cancel()
+	ref, _ := telegram.ParseReference("@examplechannel")
+	requests := 0
+	result := a.lookupReferenceWithinBudget(budget, ref, 0, &requests)
+	if result.Status != "limit" || requests != 0 || calls.Load() != 0 {
+		t.Fatalf("expired budget became shared query failure: %+v requests=%d calls=%d", result, requests, calls.Load())
+	}
+}

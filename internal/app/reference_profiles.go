@@ -38,13 +38,7 @@ func (a *App) referencedProfiles(ctx context.Context, j store.Job, m *telegram.M
 			}
 		}
 		stored, err := a.Store.ResolveReference(ctx, j.ID, a.Telegram.Me.ID, ref, entry.depth, a.Config.Snapshot().Telegram.ProfileCacheSeconds, func() telegram.ReferenceLookup {
-			if ref.Username != "" {
-				if requests >= 8 {
-					return telegram.ReferenceLookup{Reference: ref, Status: "limit", Error: "per-message reference query limit reached", FetchedAt: time.Now().UnixMilli()}
-				}
-				requests++
-			}
-			return a.Telegram.LookupReference(budget, ref, known)
+			return a.lookupReferenceWithinBudget(budget, ref, known, &requests)
 		})
 		if err != nil {
 			return nil, err
@@ -64,4 +58,14 @@ func (a *App) referencedProfiles(ctx context.Context, j store.Job, m *telegram.M
 		}
 	}
 	return out, nil
+}
+
+func (a *App) lookupReferenceWithinBudget(budget context.Context, ref telegram.Reference, known int64, requests *int) telegram.ReferenceLookup {
+	if ref.Username != "" {
+		if budget.Err() != nil || *requests >= 8 {
+			return telegram.ReferenceLookup{Reference: ref, Status: "limit", Error: "per-message reference query budget exhausted", FetchedAt: time.Now().UnixMilli()}
+		}
+		*requests += 1
+	}
+	return a.Telegram.LookupReference(budget, ref, known)
 }
