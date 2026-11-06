@@ -24,6 +24,7 @@ type joinRemote struct {
 	role, bio                        atomic.Value
 	beforeMembership                 func()
 	beforeModel                      func()
+	beforeKick                       func()
 	pollRaw                          json.RawMessage
 	polls                            atomic.Int32
 	subscribed                       atomic.Bool
@@ -104,6 +105,9 @@ func joinApp(t *testing.T, mode string, enabled bool) (*App, string, *joinRemote
 			}
 			json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"id": id, "type": "private", "bio": r.bio.Load().(string)}})
 		case strings.HasSuffix(req.URL.Path, "/unbanChatMember"):
+			if r.beforeKick != nil {
+				r.beforeKick()
+			}
 			if req.FormValue("user_id") == "99" || req.FormValue("only_if_banned") == "true" {
 				t.Errorf("wrong removal: %v", req.Form)
 			}
@@ -366,5 +370,35 @@ func TestJoinRuntimeSubscribesAndDrainsDurableMembershipWork(t *testing.T) {
 	}
 	if scalar(t, path, `SELECT count(*) FROM updates WHERE processed=1`) != 1 {
 		t.Fatal("polling did not durably capture membership")
+	}
+}
+
+func TestJoinDisableAcknowledgementWaitsForDispatchAlreadyInProgress(t *testing.T) {
+	a, _, r := joinApp(t, "enforce", true)
+	deliverMembership(t, a, 1, -100, 50, "left", "member")
+	runJoin(t, a, time.Now())
+	entered, release := make(chan struct{}), make(chan struct{})
+	r.beforeKick = func() { close(entered); <-release }
+	done := make(chan error, 1)
+	go func() { _, err := a.ProcessJoinAction(context.Background()); done <- err }()
+	<-entered
+	disabled := make(chan error, 1)
+	go func() { _, err := a.joinCommand(context.Background(), message(42, ""), "off"); disabled <- err }()
+	select {
+	case err := <-disabled:
+		close(release)
+		<-done
+		t.Fatalf("disable raced with dispatched request: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-disabled; err != nil {
+		t.Fatal(err)
+	}
+	if a.Config.Snapshot().ForJoinGroup(-100).Enabled {
+		t.Fatal("disable lost")
 	}
 }

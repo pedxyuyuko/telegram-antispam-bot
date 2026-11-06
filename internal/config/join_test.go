@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func joinConfigJSON() string {
@@ -103,5 +104,53 @@ func TestJoinConfigurationRejectsUnknownFieldsAndPreservesEmptyRules(t *testing.
 	}
 	if len(c.ForJoinGroup(-200).Rules) != 0 {
 		t.Fatal("empty rule map resurrected default removal")
+	}
+}
+
+func TestJoinDispatchSerializesConfigChangesThroughSend(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(joinConfigJSON()), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	dispatchDone := make(chan error, 1)
+	go func() {
+		dispatchDone <- m.WithJoinDispatch(func(c Config) error {
+			close(entered)
+			<-release
+			if !c.ForJoinGroup(-200).Enabled {
+				t.Error("dispatch snapshot changed")
+			}
+			return nil
+		})
+	}()
+	<-entered
+	writeStarted, writeDone := make(chan struct{}), make(chan error, 1)
+	go func() {
+		close(writeStarted)
+		chat := int64(-200)
+		writeDone <- m.SetJoin(&chat, "enabled", json.RawMessage(`false`))
+	}()
+	<-writeStarted
+	select {
+	case err := <-writeDone:
+		close(release)
+		<-dispatchDone
+		t.Fatalf("disable acknowledged during protected dispatch: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(release)
+	if err := <-dispatchDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-writeDone; err != nil {
+		t.Fatal(err)
+	}
+	if m.Snapshot().ForJoinGroup(-200).Enabled {
+		t.Fatal("disable was lost after dispatch finished")
 	}
 }

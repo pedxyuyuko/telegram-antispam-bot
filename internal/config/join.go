@@ -93,3 +93,11 @@ func (c Config) validateJoinGate() error {
 func (m *Manager) SetJoin(chat *int64, path string, value json.RawMessage) error {
 	return m.changePolicy(chat, path, value, false, true)
 }
+
+// WithJoinDispatch holds live configuration stable through the final authority
+// check and API request. The callback must use its supplied snapshot exclusively.
+func (m *Manager) WithJoinDispatch(checkAndSend func(Config) error) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return checkAndSend(m.snapshotLocked())
+}

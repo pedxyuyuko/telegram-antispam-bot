@@ -164,25 +164,33 @@ func (a *App) ProcessJoinAction(ctx context.Context) (bool, error) {
 		return finish()
 	}
 	// Network preflight can outlive a command or a new membership update.
-	if valid, err := a.joinActionPolicy(a.Config.Snapshot(), j, intent); err != nil {
-		return false, err
-	} else if !valid {
-		detail = "join policy or protected identity changed"
-		return finish()
-	}
-	ready, err := a.Store.StartJoinAction(ctx, *intent)
+	err = a.Config.WithJoinDispatch(func(cfg config.Config) error {
+		valid, err := a.joinActionPolicy(cfg, j, intent)
+		if err != nil {
+			return err
+		}
+		if !valid {
+			detail = "join policy or protected identity changed"
+			return nil
+		}
+		ready, err := a.Store.StartJoinAction(ctx, *intent)
+		if err != nil {
+			return err
+		}
+		if !ready {
+			detail = "join action cancelled or membership episode changed"
+			return nil
+		}
+		err = a.Telegram.Kick(callCtx, intent.ChatID, intent.UserID)
+		status = "succeeded"
+		if err != nil {
+			status = "failed"
+			detail = fmt.Sprint(err)
+		}
+		return nil
+	})
 	if err != nil {
 		return false, err
-	}
-	if !ready {
-		detail = "join action cancelled or membership episode changed"
-		return finish()
-	}
-	err = a.Telegram.Kick(callCtx, intent.ChatID, intent.UserID)
-	status = "succeeded"
-	if err != nil {
-		status = "failed"
-		detail = fmt.Sprint(err)
 	}
 	return finish()
 }

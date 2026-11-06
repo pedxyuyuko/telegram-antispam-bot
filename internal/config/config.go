@@ -401,6 +401,10 @@ func Open(path string) (*Manager, error) {
 func (m *Manager) Snapshot() Config {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	return m.snapshotLocked()
+}
+
+func (m *Manager) snapshotLocked() Config {
 	raw, _ := json.Marshal(m.config)
 	var c Config
 	_ = json.Unmarshal(raw, &c)
