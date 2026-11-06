@@ -10,12 +10,15 @@ import (
 )
 
 type ReferenceLookup struct {
-	Reference             Reference
-	Profile               ReferenceProfile
-	ChatID                int64
-	Status, Error         string
-	Request, Response     json.RawMessage
-	FetchedAt, DurationMS int64
+	Reference  Reference        `json:"reference"`
+	Profile    ReferenceProfile `json:"profile"`
+	ChatID     int64            `json:"chat_id"`
+	Status     string           `json:"status"`
+	Error      string           `json:"error,omitempty"`
+	Request    json.RawMessage  `json:"request"`
+	Response   json.RawMessage  `json:"response"`
+	FetchedAt  int64            `json:"fetched_at"`
+	DurationMS int64            `json:"duration_ms"`
 }
 
 // LookupReference uses only the existing Bot API connection. Known bot IDs may

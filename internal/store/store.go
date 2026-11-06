@@ -137,7 +137,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if version > 6 {
+	if version > 7 {
 		db.Close()
 		return nil, fmt.Errorf("unsupported database schema version %d", version)
 	}
@@ -163,6 +163,11 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	if _, err := tx.Exec(contentCacheSchema); err != nil {
+		tx.Rollback()
+		db.Close()
+		return nil, err
+	}
+	if _, err := tx.Exec(referenceProfilesSchema); err != nil {
 		tx.Rollback()
 		db.Close()
 		return nil, err
@@ -266,8 +271,26 @@ func (s *Store) Revision(ctx context.Context, id int64) (*Job, error) {
 	return scanJob(s.db.QueryRowContext(ctx, `SELECT `+jobColumns+` FROM revisions WHERE id=?`, id))
 }
 func (s *Store) SetState(ctx context.Context, id int64, state []byte) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE revisions SET state=? WHERE id=? AND state=''`, string(state), id)
+	_, err := s.FreezeState(ctx, id, state)
 	return err
+}
+func (s *Store) FreezeState(ctx context.Context, id int64, state []byte) ([]byte, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE revisions SET state=? WHERE id=? AND state=''`, string(state), id); err != nil {
+		return nil, err
+	}
+	var saved []byte
+	if err := tx.QueryRowContext(ctx, `SELECT state FROM revisions WHERE id=?`, id).Scan(&saved); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return saved, nil
 }
 func (s *Store) Stats(ctx context.Context, chat int64) (map[string]int, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT status,count(*) FROM revisions WHERE chat_id=? GROUP BY status`, chat)
