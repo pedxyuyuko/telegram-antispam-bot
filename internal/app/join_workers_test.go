@@ -28,6 +28,11 @@ type joinRemote struct {
 	pollRaw                          json.RawMessage
 	polls                            atomic.Int32
 	subscribed                       atomic.Bool
+	deletes                          atomic.Int32
+	deletedID                        atomic.Int64
+	deleteFail, benign               atomic.Bool
+	beforeDelete                     func()
+	pollBatch                        []json.RawMessage
 }
 
 func joinApp(t *testing.T, mode string, enabled bool) (*App, string, *joinRemote) {
@@ -52,8 +57,12 @@ func joinApp(t *testing.T, mode string, enabled bool) (*App, string, *joinRemote
 				t.Error(err)
 			}
 			answers := map[string]any{}
+			probability := .99
+			if r.benign.Load() {
+				probability = .01
+			}
 			for id := range body.Questions {
-				answers[id] = map[string]any{"type": "noul", "noul": .99}
+				answers[id] = map[string]any{"type": "noul", "noul": probability}
 			}
 			json.NewEncoder(w).Encode(map[string]any{"model": "m", "answers": answers})
 			return
@@ -71,8 +80,12 @@ func joinApp(t *testing.T, mode string, enabled bool) (*App, string, *joinRemote
 					r.subscribed.Store(true)
 				}
 			}
-			if r.polls.Add(1) == 1 && r.subscribed.Load() && len(r.pollRaw) > 0 {
-				fmt.Fprintf(w, `{"ok":true,"result":[%s]}`, r.pollRaw)
+			if r.polls.Add(1) == 1 && r.subscribed.Load() && (len(r.pollRaw) > 0 || len(r.pollBatch) > 0) {
+				batch := r.pollBatch
+				if len(batch) == 0 {
+					batch = []json.RawMessage{r.pollRaw}
+				}
+				json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": batch})
 			} else {
 				select {
 				case <-req.Context().Done():
@@ -115,6 +128,14 @@ func joinApp(t *testing.T, mode string, enabled bool) (*App, string, *joinRemote
 			fmt.Fprintf(w, `{"ok":true,"result":%t}`, !r.kickFail.Load())
 		case strings.HasSuffix(req.URL.Path, "/sendMessage"):
 			fmt.Fprint(w, `{"ok":true,"result":{"message_id":100,"chat":{"id":-100,"type":"supergroup"},"date":1}}`)
+		case strings.HasSuffix(req.URL.Path, "/deleteMessage"):
+			if r.beforeDelete != nil {
+				r.beforeDelete()
+			}
+			id, _ := strconv.ParseInt(req.FormValue("message_id"), 10, 64)
+			r.deletedID.Store(id)
+			r.deletes.Add(1)
+			fmt.Fprintf(w, `{"ok":true,"result":%t}`, !r.deleteFail.Load())
 		default:
 			t.Errorf("unexpected Telegram operation: %s", req.URL.Path)
 			fmt.Fprint(w, `{"ok":true,"result":true}`)
@@ -142,13 +163,17 @@ func joinApp(t *testing.T, mode string, enabled bool) (*App, string, *joinRemote
 	return a, path, r
 }
 
-func memberUpdate(id, chat, user int64, old, next string) json.RawMessage {
-	return json.RawMessage(fmt.Sprintf(`{"update_id":%d,"chat_member":{"chat":{"id":%d,"type":"supergroup"},"from":{"id":99,"first_name":"Inviter"},"date":%d,"old_chat_member":{"status":%q,"user":{"id":%d,"first_name":"Member"}},"new_chat_member":{"status":%q,"user":{"id":%d,"first_name":"New","last_name":"Member"}},"unknown":"retained"}}`, id, chat, user+1700000000+id, old, user, next, user))
+func memberUpdate(id, chat, user int64, old, next string, at ...int64) json.RawMessage {
+	date := user + 1700000000 + id
+	if len(at) > 0 {
+		date = at[0]
+	}
+	return json.RawMessage(fmt.Sprintf(`{"update_id":%d,"chat_member":{"chat":{"id":%d,"type":"supergroup"},"from":{"id":99,"first_name":"Inviter"},"date":%d,"old_chat_member":{"status":%q,"user":{"id":%d,"first_name":"Member"}},"new_chat_member":{"status":%q,"user":{"id":%d,"first_name":"New","last_name":"Member"}},"unknown":"retained"}}`, id, chat, date, old, user, next, user))
 }
 
-func deliverMembership(t *testing.T, a *App, id, chat, user int64, old, next string) {
+func deliverMembership(t *testing.T, a *App, id, chat, user int64, old, next string, at ...int64) {
 	t.Helper()
-	if err := a.Store.Capture(context.Background(), []json.RawMessage{memberUpdate(id, chat, user, old, next)}); err != nil {
+	if err := a.Store.Capture(context.Background(), []json.RawMessage{memberUpdate(id, chat, user, old, next, at...)}); err != nil {
 		t.Fatal(err)
 	}
 	if ok, err := a.ProcessInbox(context.Background()); err != nil || !ok {

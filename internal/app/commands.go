@@ -130,7 +130,16 @@ func (a *App) ProcessInbox(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	archived, err := a.Store.AddRevision(ctx, *in, m, store.Snapshot{Policy: policy, Questions: questions, SkipReason: skipReason, ModelID: cfg.Model.Name, ModelEndpoint: cfg.Model.BaseURL, ContextVersion: telegram.SegmentedContextVersion}, status)
+	snapshot := store.Snapshot{Policy: policy, Questions: questions, SkipReason: skipReason, ModelID: cfg.Model.Name, ModelEndpoint: cfg.Model.BaseURL, ContextVersion: telegram.SegmentedContextVersion}
+	if skipReason == "membership_service" && len(m.NewChatMembers) > 0 && u.Edited == nil && cfg.JoinGate != nil {
+		joinPolicy := cfg.ForJoinGroup(m.Chat.ID)
+		joinQuestions, err := cfg.SelectedQuestions(joinPolicy.Policy)
+		if err != nil {
+			return false, err
+		}
+		snapshot.Join = &store.JoinSnapshot{Policy: joinPolicy, Questions: joinQuestions, ModelID: cfg.Model.Name, ModelEndpoint: cfg.Model.BaseURL}
+	}
+	archived, err := a.Store.AddRevision(ctx, *in, m, snapshot, status)
 	if err != nil {
 		return false, err
 	}
