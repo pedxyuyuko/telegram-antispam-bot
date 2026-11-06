@@ -31,11 +31,12 @@ type Inbox struct {
 	ReceivedAt int64
 }
 type Snapshot struct {
-	ModelID       string                     `json:"model_id,omitempty"`
-	ModelEndpoint string                     `json:"model_endpoint,omitempty"`
-	Policy        config.Policy              `json:"policy"`
-	Questions     map[string]config.Question `json:"questions"`
-	SkipReason    string                     `json:"skip_reason,omitempty"`
+	ContextVersion int                        `json:"context_version,omitempty"`
+	ModelID        string                     `json:"model_id,omitempty"`
+	ModelEndpoint  string                     `json:"model_endpoint,omitempty"`
+	Policy         config.Policy              `json:"policy"`
+	Questions      map[string]config.Question `json:"questions"`
+	SkipReason     string                     `json:"skip_reason,omitempty"`
 }
 type Job struct {
 	ID         int64

@@ -1,6 +1,10 @@
 package telegram
 
-import "encoding/json"
+import (
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+)
 
 const SegmentedContextVersion = 2
 
@@ -105,4 +109,89 @@ func (m *Message) SegmentedModelState(profile Profile, profiles map[string]Refer
 		Reply   json.RawMessage  `json:"reply"`
 		Message []map[string]any `json:"message"`
 	}{sender, state["reply"], parts})
+}
+
+func unresolvedProfile(value any) bool {
+	switch item := value.(type) {
+	case []any:
+		for _, child := range item {
+			if unresolvedProfile(child) {
+				return true
+			}
+		}
+	case map[string]any:
+		if item["type"] == "mention" && item["profile"] == nil {
+			return true
+		}
+		if target, ok := item["url"].(string); ok {
+			if ref, valid := ParseReference(target); valid && ref.Username != "" && item["profile"] == nil {
+				return true
+			}
+		}
+		if item["type"] == "buttons" {
+			links, _ := item["links"].(map[string]any)
+			profiles, _ := item["profiles"].(map[string]any)
+			for id, target := range links {
+				url, _ := target.(string)
+				if ref, valid := ParseReference(url); valid && ref.Username != "" && profiles[id] == nil {
+					return true
+				}
+			}
+		}
+		for _, child := range item {
+			if unresolvedProfile(child) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// SegmentedContentFingerprint binds reference-dependent content to its frozen
+// profile snapshot. Bot API-unsupported invites stay explicit, stable nulls.
+func (m *Message) SegmentedContentFingerprint(state json.RawMessage) (ContentFingerprint, error) {
+	base, err := m.ContentFingerprint()
+	if err != nil || base.Hash == "" {
+		return base, err
+	}
+	if len(state) == 0 {
+		for _, ref := range m.References(Profile{}) {
+			if ref.Username != "" {
+				return ContentFingerprint{}, nil
+			}
+		}
+		state, err = m.SegmentedModelState(Profile{}, nil)
+		if err != nil {
+			return ContentFingerprint{}, err
+		}
+	}
+	var material struct {
+		Message []any `json:"message"`
+	}
+	if err := json.Unmarshal(state, &material); err != nil {
+		return ContentFingerprint{}, err
+	}
+	if material.Message == nil || unresolvedProfile(material.Message) {
+		return ContentFingerprint{}, nil
+	}
+	parts := make([]any, 0, len(material.Message))
+	for _, part := range material.Message {
+		if object, ok := part.(map[string]any); ok && object["type"] == "source" {
+			delete(object, "caller")
+			delete(object, "via_bot")
+			if len(object) == 1 {
+				continue
+			}
+		}
+		parts = append(parts, part)
+	}
+	raw, err := json.Marshal(struct {
+		Version int             `json:"context_version"`
+		Content json.RawMessage `json:"content"`
+		Message []any           `json:"message"`
+	}{SegmentedContextVersion, base.Material, parts})
+	if err != nil {
+		return ContentFingerprint{}, err
+	}
+	return ContentFingerprint{Hash: fmt.Sprintf("%x", sha256.Sum256(raw)), Material: raw}, nil
 }

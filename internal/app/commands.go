@@ -125,7 +125,7 @@ func (a *App) ProcessInbox(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	archived, err := a.Store.AddRevision(ctx, *in, m, store.Snapshot{Policy: policy, Questions: questions, SkipReason: skipReason, ModelID: cfg.Model.Name, ModelEndpoint: cfg.Model.BaseURL}, status)
+	archived, err := a.Store.AddRevision(ctx, *in, m, store.Snapshot{Policy: policy, Questions: questions, SkipReason: skipReason, ModelID: cfg.Model.Name, ModelEndpoint: cfg.Model.BaseURL, ContextVersion: telegram.SegmentedContextVersion}, status)
 	if err != nil {
 		return false, err
 	}

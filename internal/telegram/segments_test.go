@@ -132,3 +132,56 @@ func TestSegmentedButtonsWithOnlyCallbackDataKeepTheirText(t *testing.T) {
 		t.Fatal("button label lost")
 	}
 }
+
+func TestSegmentedFingerprintRequiresAndVersionsQueryableProfiles(t *testing.T) {
+	m := fingerprintMessage(t, `{"text":"@examplechannel run"}`)
+	if f, err := m.SegmentedContentFingerprint(nil); err != nil || f.Hash != "" {
+		t.Fatal("reference-free admission key invented")
+	}
+	state, err := m.SegmentedModelState(Profile{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f, err := m.SegmentedContentFingerprint(state); err != nil || f.Hash != "" {
+		t.Fatal("failed profile entered cache")
+	}
+	var previous string
+	for _, bio := range []string{"first", "second"} {
+		state, err = m.SegmentedModelState(Profile{}, map[string]ReferenceProfile{"username:examplechannel": {Username: "examplechannel", Name: "Channel", Bio: bio}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		f, err := m.SegmentedContentFingerprint(state)
+		if err != nil || f.Hash == "" || f.Hash == previous {
+			t.Fatal("profile snapshot missing from cache key")
+		}
+		previous = f.Hash
+	}
+}
+
+func TestSegmentedFingerprintKeepsPureAdCacheIndependentOfCaller(t *testing.T) {
+	a := fingerprintMessage(t, `{"text":"ad","from":{"id":200,"is_bot":true},"guest_bot_caller_user":{"first_name":"one"},"reply_markup":{"inline_keyboard":[[{"text":"join","url":"https://t.me/+invite"}]]}}`)
+	b := fingerprintMessage(t, `{"text":"ad","from":{"id":201,"is_bot":true},"guest_bot_caller_user":{"first_name":"two"},"reply_markup":{"inline_keyboard":[[{"text":"join","url":"https://t.me/+invite"}]]}}`)
+	x, err := a.SegmentedContentFingerprint(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := b.SegmentedModelState(Profile{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	y, err := b.SegmentedContentFingerprint(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if x.Hash == "" || x.Hash != y.Hash {
+		t.Fatal("caller or unsupported invitation disabled pure ad reuse")
+	}
+	old, err := a.ContentFingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old.Hash == x.Hash {
+		t.Fatal("context format failed to isolate old cache")
+	}
+}

@@ -42,6 +42,12 @@ func jobFingerprint(j Job) (telegram.ContentFingerprint, error) {
 	if !m.IsGroup() || m.IsAutomaticForward {
 		return telegram.ContentFingerprint{}, nil
 	}
+	if j.Snapshot.ContextVersion == telegram.SegmentedContextVersion {
+		return m.SegmentedContentFingerprint(j.State)
+	}
+	if j.Snapshot.ContextVersion > telegram.SegmentedContextVersion {
+		return telegram.ContentFingerprint{}, nil
+	}
 	return m.ContentFingerprint()
 }
 

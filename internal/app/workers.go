@@ -68,9 +68,19 @@ func (a *App) ProcessModel(ctx context.Context, now time.Time) (bool, error) {
 	var inferenceErr error
 	if !reused {
 		debug(diagnostic, "context.started")
-		j.State, inferenceErr = m.ModelState(a.Telegram.Profile(ctx, &m, diagnostic))
+		profile := a.Telegram.Profile(ctx, &m, diagnostic)
+		if j.Snapshot.ContextVersion == telegram.SegmentedContextVersion {
+			profiles, err := a.referencedProfiles(ctx, *j, &m, profile, diagnostic)
+			if err != nil {
+				return false, err
+			}
+			j.State, inferenceErr = m.SegmentedModelState(profile, profiles)
+		} else {
+			j.State, inferenceErr = m.ModelState(profile)
+		}
 		if inferenceErr == nil {
-			if err := a.Store.SetState(ctx, j.ID, j.State); err != nil {
+			j.State, err = a.Store.FreezeState(ctx, j.ID, j.State)
+			if err != nil {
 				return false, err
 			}
 		} else {
@@ -80,6 +90,24 @@ func (a *App) ProcessModel(ctx context.Context, now time.Time) (bool, error) {
 	}
 	var result decision.Result
 	if inferenceErr == nil {
+		if !hit && j.Snapshot.ContextVersion == telegram.SegmentedContextVersion {
+			cached, hit, err = a.Store.ApplyContentCache(ctx, *j, cfg.Model)
+			if err != nil {
+				return false, err
+			}
+			if hit {
+				if cached.Cache != nil {
+					debug(diagnostic, "content_cache.hit", "cache_id", cached.Cache.CacheID, "source_attempt", cached.Cache.SourceAttemptID, "model", cached.Cache.ModelID)
+				}
+				for _, action := range cached.Actions {
+					debug(diagnostic, "action.planned", "action_id", action.ID, "action", action.Kind, "rule", action.RuleID, "status", action.Status, "source", "content_cache")
+				}
+				for _, link := range cached.LinkedActions {
+					debug(diagnostic, "invocation.planned", "target_message", link.MessageID, "target_revision", link.RevisionID, "action_id", link.ActionID, "source_action", link.SourceActionID, "action", link.Kind)
+				}
+				return true, nil
+			}
+		}
 		debug(diagnostic, "context.ready", "reused", reused, "state_bytes", len(j.State))
 		debug(diagnostic, "model.started", "model", cfg.Model.Name, "question_count", len(j.Snapshot.Questions), "questions", questionIDs(j.Snapshot.Questions), "timeout_seconds", cfg.Model.TimeoutSeconds)
 		result, inferenceErr = a.Model.Evaluate(ctx, cfg.Model, j.Snapshot.Questions, j.State)
