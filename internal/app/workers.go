@@ -328,7 +328,7 @@ func (a *App) ProcessAction(ctx context.Context) (bool, error) {
 func (a *App) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	errors := make(chan error, 3)
+	errors := make(chan error, 5)
 	var wg sync.WaitGroup
 	launch := func(name string, step func(context.Context) (bool, error)) {
 		wg.Add(1)
@@ -357,6 +357,8 @@ func (a *App) Run(ctx context.Context) error {
 	launch("inbox", a.ProcessInbox)
 	launch("model", func(ctx context.Context) (bool, error) { return a.ProcessModel(ctx, time.Now()) })
 	launch("actions", a.ProcessAction)
+	launch("join-model", func(ctx context.Context) (bool, error) { return a.ProcessJoinModel(ctx, time.Now()) })
+	launch("join-actions", a.ProcessJoinAction)
 	wg.Add(1)
 	go func() { defer wg.Done(); a.Telegram.Start(ctx) }()
 	var err error

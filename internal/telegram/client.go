@@ -76,7 +76,7 @@ func New(cfg config.Telegram, token string, httpClient bot.HttpClient, lastID in
 	c := &Client{token: token, ttl: time.Duration(cfg.ProfileCacheSeconds) * time.Second, profiles: map[int64]cachedProfile{}}
 	b, err := bot.New(token, bot.WithSkipGetMe(), bot.WithServerURL(cfg.APIBase),
 		bot.WithHTTPClient(time.Duration(cfg.PollTimeoutSeconds)*time.Second, httpClient),
-		bot.WithAllowedUpdates(bot.AllowedUpdates{"message", "edited_message"}), bot.WithInitialOffset(lastID),
+		bot.WithAllowedUpdates(bot.AllowedUpdates{"message", "edited_message", "chat_member"}), bot.WithInitialOffset(lastID),
 		bot.WithWorkers(1), bot.WithNotAsyncHandlers(), bot.WithUpdatesChannelCap(1),
 		bot.WithDefaultHandler(func(context.Context, *bot.Bot, *models.Update) {}),
 		bot.WithErrorsHandler(func(err error) { log.Error("telegram polling", "error", c.safe(err)) }))

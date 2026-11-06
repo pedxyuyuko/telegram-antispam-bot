@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -23,6 +24,9 @@ type joinRemote struct {
 	role, bio                        atomic.Value
 	beforeMembership                 func()
 	beforeModel                      func()
+	pollRaw                          json.RawMessage
+	polls                            atomic.Int32
+	subscribed                       atomic.Bool
 }
 
 func joinApp(t *testing.T, mode string, enabled bool) (*App, string, *joinRemote) {
@@ -58,6 +62,23 @@ func joinApp(t *testing.T, mode string, enabled bool) (*App, string, *joinRemote
 			defer req.MultipartForm.RemoveAll()
 		}
 		switch {
+		case strings.HasSuffix(req.URL.Path, "/getUpdates"):
+			var updates []string
+			_ = json.Unmarshal([]byte(req.FormValue("allowed_updates")), &updates)
+			for _, name := range updates {
+				if name == "chat_member" {
+					r.subscribed.Store(true)
+				}
+			}
+			if r.polls.Add(1) == 1 && r.subscribed.Load() && len(r.pollRaw) > 0 {
+				fmt.Fprintf(w, `{"ok":true,"result":[%s]}`, r.pollRaw)
+			} else {
+				select {
+				case <-req.Context().Done():
+				case <-time.After(20 * time.Millisecond):
+					fmt.Fprint(w, `{"ok":true,"result":[]}`)
+				}
+			}
 		case strings.HasSuffix(req.URL.Path, "/getChatMember"):
 			user, _ := strconv.ParseInt(req.FormValue("user_id"), 10, 64)
 			role := r.role.Load().(string)
@@ -295,5 +316,55 @@ func TestJoinFailedRemovalIsArchivedWithoutReplay(t *testing.T) {
 	runJoinAction(t, a)
 	if r.kicks.Load() != 1 || scalar(t, path, `SELECT count(*) FROM join_actions WHERE status='failed' AND detail<>''`) != 1 {
 		t.Fatal("failed removal evidence lost or dispatched twice")
+	}
+}
+
+func TestJoinRuntimeSubscribesAndDrainsDurableMembershipWork(t *testing.T) {
+	a, path, r := joinApp(t, "enforce", true)
+	r.pollRaw = memberUpdate(1, -100, 50, "left", "member")
+	cfg := a.Config.Snapshot().Telegram
+	cfg.APIBase = a.Config.Snapshot().Model.BaseURL
+	durable := &telegram.DurableClient{HTTP: &http.Client{Timeout: 2 * time.Second}, Capture: a.Store.Capture}
+	tg, err := telegram.New(cfg, "123:offline", durable, 0, a.Log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tg.Me = a.Telegram.Me
+	a.Telegram = tg
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- a.Run(ctx) }()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	finished := false
+	for !finished {
+		select {
+		case <-ctx.Done():
+			finished = true
+		case <-ticker.C:
+			var n int
+			if err := db.QueryRow(`SELECT count(*) FROM join_actions WHERE status='succeeded'`).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			if n == 1 {
+				finished = true
+			}
+		}
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !r.subscribed.Load() || r.models.Load() != 1 || r.kicks.Load() != 1 {
+		t.Fatalf("runtime join work not connected: subscribed=%v models=%d kicks=%d", r.subscribed.Load(), r.models.Load(), r.kicks.Load())
+	}
+	if scalar(t, path, `SELECT count(*) FROM updates WHERE processed=1`) != 1 {
+		t.Fatal("polling did not durably capture membership")
 	}
 }
