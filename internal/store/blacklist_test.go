@@ -19,8 +19,8 @@ func TestBlacklistMigrationCreatesAuditableGlobalState(t *testing.T) {
 	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 7 {
-		t.Fatalf("blacklist schema version=%d want 7", version)
+	if version != 8 {
+		t.Fatalf("blacklist schema version=%d want 8", version)
 	}
 	for _, name := range []string{"bot_blacklist", "bot_blacklist_events", "blacklist_matches", "action_evidence", "bot_action_events", "bot_invocations"} {
 		var n int

@@ -138,7 +138,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if version > 7 {
+	if version > 8 {
 		db.Close()
 		return nil, fmt.Errorf("unsupported database schema version %d", version)
 	}
@@ -173,6 +173,11 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if _, err := tx.Exec(joinSchema); err != nil {
+		tx.Rollback()
+		db.Close()
+		return nil, err
+	}
 	if err := bootstrapBotBlacklist(context.Background(), tx); err != nil {
 		tx.Rollback()
 		db.Close()
@@ -185,6 +190,10 @@ func Open(path string) (*Store, error) {
 	// Model calls can be retried. A moderation request interrupted after dispatch
 	// has an unknown remote outcome and is kept for inspection rather than replay.
 	if _, err := db.Exec(`UPDATE revisions SET status='pending' WHERE status='running'; UPDATE actions SET status='uncertain',detail='process stopped during dispatch' WHERE status='executing'`); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if _, err := db.Exec(`UPDATE join_events SET status='pending' WHERE status='running'; UPDATE join_actions SET status='pending' WHERE status='checking'; UPDATE join_actions SET status='uncertain',detail='process stopped during dispatch' WHERE status='executing'`); err != nil {
 		db.Close()
 		return nil, err
 	}
