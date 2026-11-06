@@ -108,3 +108,33 @@ func TestPerMessageReferenceLimitDoesNotBecomeGlobalFailureCache(t *testing.T) {
 		t.Fatalf("limit contaminated next message: %+v calls=%d err=%v", result, calls, err)
 	}
 }
+
+func TestExpiredFailedLookupDoesNotResurrectOlderProfile(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	ref, _ := telegram.ParseReference("@examplechannel")
+	for i := int64(1); i <= 3; i++ {
+		add(t, s, i, -100, int(i), 50, config.Defaults().Base)
+	}
+	for i, status := range []string{"available", "unavailable"} {
+		age := 120
+		if i == 1 {
+			age = 70
+		}
+		if _, err := s.ResolveReference(ctx, int64(i+1), 123, ref, 0, 0, func() telegram.ReferenceLookup {
+			return telegram.ReferenceLookup{Status: status, FetchedAt: time.Now().Add(-time.Duration(age) * time.Second).UnixMilli()}
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	calls := 0
+	if _, err := s.ResolveReference(ctx, 3, 123, ref, 0, 300, func() telegram.ReferenceLookup {
+		calls++
+		return telegram.ReferenceLookup{Status: "available", FetchedAt: time.Now().UnixMilli()}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatal("older profile superseded a more recent failed lookup")
+	}
+}

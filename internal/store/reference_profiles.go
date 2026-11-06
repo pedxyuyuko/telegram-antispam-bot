@@ -56,11 +56,21 @@ func (s *Store) ResolveReference(ctx context.Context, revision, botID int64, ref
 	now := time.Now().UnixMilli()
 	ttl := int64(min(max(ttlSeconds, 0), 3600)) * 1000
 	if ttl > 0 {
-		cached, err = scanReference(s.db.QueryRowContext(ctx, `SELECT id,payload FROM reference_profiles WHERE bot_id=? AND reference_key=? AND status<>'limit' AND fetched_at<=? AND fetched_at>=? AND (status='available' OR fetched_at>=?) ORDER BY fetched_at DESC,id DESC LIMIT 1`, botID, ref.Key, now, now-ttl, now-min(ttl, 60000)))
+		cached, err = scanReference(s.db.QueryRowContext(ctx, `SELECT id,payload FROM reference_profiles WHERE bot_id=? AND reference_key=? AND status<>'limit' ORDER BY fetched_at DESC,id DESC LIMIT 1`, botID, ref.Key))
 		if errors.Is(err, sql.ErrNoRows) {
 			cached = nil
 		} else if err != nil {
 			return StoredReference{}, err
+		}
+		if cached != nil {
+			age := now - cached.Lookup.FetchedAt
+			allowed := ttl
+			if cached.Lookup.Status != "available" {
+				allowed = min(allowed, 60000)
+			}
+			if age < 0 || age > allowed {
+				cached = nil
+			}
 		}
 	}
 	var lookup telegram.ReferenceLookup
