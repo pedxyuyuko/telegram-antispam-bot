@@ -13,8 +13,8 @@ import (
 	"telegram-antispam-bot/internal/expression"
 )
 
-// Includes raw captured membership changes whose inbox processing has not yet
-// caught up, so slow ingestion cannot authorize removal for a previous arrival.
+// Includes episode-ending raw updates whose inbox processing has not yet caught
+// up. Ordinary in-group permission changes preserve the same arrival episode.
 func joinCurrentTx(ctx context.Context, tx *sql.Tx, id int64) (bool, error) {
 	var current bool
 	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM join_events e WHERE e.id=? AND e.is_join=1 AND NOT EXISTS(
@@ -23,8 +23,16 @@ func joinCurrentTx(ctx context.Context, tx *sql.Tx, id int64) (bool, error) {
  AND (n.is_join=1 OR n.present=0 OR n.role IN ('administrator','creator')))
  AND NOT EXISTS(SELECT 1 FROM updates u WHERE u.processed=0
  AND json_extract(u.raw,'$.chat_member.chat.id')=e.chat_id
- AND json_extract(u.raw,'$.chat_member.new_chat_member.user.id')=e.user_id
- AND (json_extract(u.raw,'$.chat_member.date')>e.event_at OR (json_extract(u.raw,'$.chat_member.date')=e.event_at AND u.update_id>e.update_id))))`, id).Scan(&current)
+	 AND json_extract(u.raw,'$.chat_member.new_chat_member.user.id')=e.user_id
+	 AND (json_extract(u.raw,'$.chat_member.date')>e.event_at OR (json_extract(u.raw,'$.chat_member.date')=e.event_at AND u.update_id>e.update_id))
+	 AND (
+	  json_extract(u.raw,'$.chat_member.new_chat_member.status') IN ('left','kicked','administrator','creator')
+	  OR (json_extract(u.raw,'$.chat_member.new_chat_member.status')='restricted' AND coalesce(json_extract(u.raw,'$.chat_member.new_chat_member.is_member'),0)=0)
+	  OR ((json_extract(u.raw,'$.chat_member.old_chat_member.status') IN ('left','kicked')
+	       OR (json_extract(u.raw,'$.chat_member.old_chat_member.status')='restricted' AND coalesce(json_extract(u.raw,'$.chat_member.old_chat_member.is_member'),0)=0))
+	      AND (json_extract(u.raw,'$.chat_member.new_chat_member.status') IN ('member','administrator','creator')
+	           OR (json_extract(u.raw,'$.chat_member.new_chat_member.status')='restricted' AND json_extract(u.raw,'$.chat_member.new_chat_member.is_member')=1)))
+	 )))`, id).Scan(&current)
 	return current, err
 }
 

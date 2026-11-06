@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -266,5 +267,30 @@ func TestJoinRestartRetriesInferenceAndQuarantinesDispatchedActions(t *testing.T
 	s.db.QueryRow(`SELECT count(*) FROM join_actions WHERE status='uncertain'`).Scan(&n)
 	if n != 1 {
 		t.Fatal("unknown outcome lost")
+	}
+}
+
+func TestPendingMemberPermissionChangePreservesJoinEpisode(t *testing.T) {
+	for _, next := range []string{"member", "restricted"} {
+		t.Run(next, func(t *testing.T) {
+			s := openTest(t)
+			ctx := context.Background()
+			snap := joinSnapshot("enforce")
+			addMember(t, s, 1, -100, 50, "left", "member", snap)
+			j := claimJoin(t, s)
+			raw := []byte(fmt.Sprintf(`{"update_id":2,"chat_member":{"chat":{"id":-100,"type":"supergroup"},"date":%d,"old_chat_member":{"status":"member","user":{"id":50}},"new_chat_member":{"status":%q,"is_member":true,"user":{"id":50}}}}`, testNow.Unix()+2, next))
+			if err := s.Capture(ctx, []json.RawMessage{raw}); err != nil {
+				t.Fatal(err)
+			}
+			if current, err := s.JoinCurrent(ctx, j.ID); err != nil || !current {
+				t.Fatalf("same-episode pending update terminated screening: %v %v", current, err)
+			}
+			if _, err := s.FinishJoin(ctx, *j, joinResult(1, 1, 0), nil, testNow, 10); err != nil {
+				t.Fatal(err)
+			}
+			if a, err := s.TakeJoinAction(ctx); err != nil || a == nil {
+				t.Fatal("permission update lost the join decision")
+			}
+		})
 	}
 }
