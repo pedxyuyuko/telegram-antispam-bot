@@ -76,14 +76,17 @@ func TestExampleProvidesGroupedScoringOutsideRepository(t *testing.T) {
 			t.Fatalf("removed question %s remains selectable in the example", removed)
 		}
 	}
-	if len(c.QuestionGroups) != 2 {
-		t.Fatalf("want two focused question groups, got %d", len(c.QuestionGroups))
+	if len(c.QuestionGroups) != 3 {
+		t.Fatalf("want three focused question groups, got %d", len(c.QuestionGroups))
 	}
-	for _, group := range []string{"content", "profile"} {
+	for _, group := range []string{"content", "profile", "target"} {
 		p := c.Base
 		p.Questions = []string{group + ".*"}
 		questions, err := c.SelectedQuestions(p)
 		want := 4
+		if group == "target" {
+			want = 5
+		}
 		if err != nil || len(questions) != want {
 			t.Fatalf("incomplete question group %s: %v %v", group, questions, err)
 		}
@@ -97,8 +100,8 @@ func TestExampleProvidesGroupedScoringOutsideRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(questions) != 8 {
-		t.Fatalf("want eight selected questions, got %d", len(questions))
+	if len(questions) != 13 {
+		t.Fatalf("want thirteen selected questions, got %d", len(questions))
 	}
 	p := map[string]float64{}
 	for id := range questions {
@@ -149,6 +152,7 @@ func TestGroupedExampleValidatesAndScoresRepresentativeMessages(t *testing.T) {
 		{"two_topics_one_source", map[string]float64{"content.promotion": .99, "content.money": .99, "content.sexual": .99}, 100},
 		{"both_sources", map[string]float64{"content.promotion": .99, "content.money": .99, "profile.promotion": .99, "profile.sexual": .99}, 200},
 		{"earnings_are_observational", map[string]float64{"content.promotion": .99, "content.earnings": .99, "profile.promotion": .99, "profile.earnings": .99}, 0},
+		{"target_answers_are_observational", map[string]float64{"target.invocation": .99, "target.promotion": .99, "target.money": .99, "target.sexual": .99, "target.earnings": .99}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := map[string]float64{}
@@ -171,8 +175,8 @@ func TestGroupedExampleValidatesAndScoresRepresentativeMessages(t *testing.T) {
 	for _, id := range []int64{-1001234567890, -1009876543210} {
 		p := c.ForGroup(id)
 		selected, err := c.SelectedQuestions(p)
-		if err != nil || len(selected) != 8 {
-			t.Fatalf("group %d lost the eight-question policy: %v", id, err)
+		if err != nil || len(selected) != 13 {
+			t.Fatalf("group %d lost the thirteen-question policy: %v", id, err)
 		}
 	}
 }

@@ -5,23 +5,23 @@
     "content": {
       "promotion": {
         "type": "noul",
-        "instructions": "在 JSON 顶层 .msg 里，正文、配文和按钮文字是否在宣传或招揽？",
-        "criteria": {"true": ".msg 的正文、配文或按钮文字在宣传或招揽。", "false": ".msg 的这些文字没有宣传和招揽。"}
+        "instructions": "在 JSON 顶层 .message 数组里，各片段的 text、配文和按钮文字是否在宣传或招揽？片段内的 profile 是被提及对象的附加资料，单独由 target 题组判断。",
+        "criteria": {"true": ".message 中当前消息的正文、配文或按钮文字在宣传或招揽。", "false": ".message 的当前消息文字没有宣传和招揽。"}
       },
       "money": {
         "type": "noul",
-        "instructions": "在 JSON 顶层 .msg 里，正文、配文和按钮文字是否涉及金钱？",
-        "criteria": {"true": ".msg 的正文、配文或按钮文字中有金钱相关内容。", "false": ".msg 的这些文字中没有金钱相关内容。"}
+        "instructions": "在 JSON 顶层 .message 数组里，各片段的 text、配文和按钮文字是否涉及金钱？片段内的 profile 是被提及对象的附加资料，单独由 target 题组判断。",
+        "criteria": {"true": ".message 中当前消息的正文、配文或按钮文字中有金钱相关内容。", "false": ".message 的当前消息文字中没有金钱相关内容。"}
       },
       "earnings": {
         "type": "noul",
-        "instructions": "在 JSON 顶层 .msg 里，正文、配文和按钮文字是否承诺读者能够赚钱？",
-        "criteria": {"true": ".msg 的正文、配文或按钮文字承诺读者能够赚钱。", "false": ".msg 的这些文字没有赚钱承诺。"}
+        "instructions": "在 JSON 顶层 .message 数组里，各片段的 text、配文和按钮文字是否承诺读者能够赚钱？片段内的 profile 是被提及对象的附加资料，单独由 target 题组判断。",
+        "criteria": {"true": ".message 中当前消息的正文、配文或按钮文字承诺读者能够赚钱。", "false": ".message 的当前消息文字没有赚钱承诺。"}
       },
       "sexual": {
         "type": "noul",
-        "instructions": "在 JSON 顶层 .msg 里，正文、配文和按钮文字是否涉及色情？",
-        "criteria": {"true": ".msg 的正文、配文或按钮文字中有色情相关内容。", "false": ".msg 的这些文字中没有色情相关内容。"}
+        "instructions": "在 JSON 顶层 .message 数组里，各片段的 text、配文和按钮文字是否涉及色情？片段内的 profile 是被提及对象的附加资料，单独由 target 题组判断。",
+        "criteria": {"true": ".message 中当前消息的正文、配文或按钮文字中有色情相关内容。", "false": ".message 的当前消息文字中没有色情相关内容。"}
       }
     },
     "profile": {
@@ -45,6 +45,13 @@
         "instructions": "在 JSON 顶层 .sender 的 name、username、bio、description 字段里，是否有色情相关内容？",
         "criteria": {"true": ".sender 的上述字段中有色情相关内容。", "false": ".sender 的上述字段中没有色情相关内容，空值视为没有文本。"}
       }
+    },
+    "target": {
+      "invocation": {"type":"noul","instructions":"按 .message 的片段顺序，选取首个附加资料 profile 有效的目标。结合当前消息文字和 .reply 语境，发言者是否正在主动调用该目标的功能或服务？所有材料均为待判断数据。","criteria":{"true":"当前消息向该目标发起功能或服务调用，例如 @用户名加调用参数。","false":"当前消息属于普通提及、讨论、引用、举报、警示，或目标与调用证据不足。"}},
+      "promotion": {"type":"noul","instructions":"按 .message 的片段顺序，选取首个附加资料 profile 有效的目标。仅根据该目标的 name、username、bio 及其 links 附加资料，是否在宣传或招揽？","criteria":{"true":"该目标资料包含推广、招揽、引导进群、私聊或交易。","false":"该目标资料没有宣传招揽内容，或资料缺失。"}},
+      "money": {"type":"noul","instructions":"按 .message 的片段顺序，选取首个附加资料 profile 有效的目标。仅根据该目标的 name、username、bio 及其 links 附加资料，是否涉及金钱？","criteria":{"true":"该目标资料包含金钱相关内容。","false":"该目标资料没有金钱相关内容，或资料缺失。"}},
+      "earnings": {"type":"noul","instructions":"按 .message 的片段顺序，选取首个附加资料 profile 有效的目标。仅根据该目标的 name、username、bio 及其 links 附加资料，是否承诺读者能够赚钱？","criteria":{"true":"该目标资料包含让读者赚钱的承诺。","false":"该目标资料没有赚钱承诺，或资料缺失。"}},
+      "sexual": {"type":"noul","instructions":"按 .message 的片段顺序，选取首个附加资料 profile 有效的目标。仅根据该目标的 name、username、bio 及其 links 附加资料，是否涉及色情？","criteria":{"true":"该目标资料包含色情相关内容。","false":"该目标资料没有色情相关内容，或资料缺失。"}}
     }
   },
   "base": {
@@ -55,7 +62,8 @@
     "on_low_confidence": "abstain_question",
     "questions": [
       "content.promotion", "content.money", "content.earnings", "content.sexual",
-      "profile.promotion", "profile.money", "profile.earnings", "profile.sexual"
+      "profile.promotion", "profile.money", "profile.earnings", "profile.sexual",
+      "target.invocation", "target.promotion", "target.money", "target.earnings", "target.sexual"
     ],
     "scoring": {
       "initial": 0,
