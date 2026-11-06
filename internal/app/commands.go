@@ -22,7 +22,7 @@ type App struct {
 	Log      *slog.Logger
 }
 
-var commands = map[string]bool{"as_help": true, "start": true, "as_config": true, "as_set": true, "as_reset": true, "as_reload": true, "as_status": true, "as_spam": true, "as_ham": true, "as_botban": true, "as_botunban": true, "as_botlist": true, "as_botget": true, "as_botedit": true}
+var commands = map[string]bool{"as_help": true, "start": true, "as_config": true, "as_set": true, "as_reset": true, "as_reload": true, "as_status": true, "as_spam": true, "as_ham": true, "as_botban": true, "as_botunban": true, "as_botlist": true, "as_botget": true, "as_botedit": true, "as_join": true}
 
 func (a *App) identify(m *telegram.Message) (name, args string) {
 	text := strings.TrimSpace(m.Text)
@@ -171,6 +171,8 @@ const help = `群管理员命令：
 /as_set <参数路径> <JSON值> — 修改本群覆盖
 /as_reset <参数路径> — 恢复继承
 /as_status — 查看本群处理统计
+/as_join on | off | status — 开启、关闭或查看本群入群检测
+/as_join mode record | enforce — 入群检测只记录或执行移出
 /as_spam 或 /as_ham — 回复消息进行人工标注
 /as_spam <消息ID> 或 /as_ham <消息ID> — 标注已入库的消息
 回复原消息并 @本机器人也会标注为 spam。
@@ -196,6 +198,8 @@ const help = `群管理员命令：
 func (a *App) command(ctx context.Context, updateID int64, m *telegram.Message, name, args string) (string, error) {
 	diagnostic := a.diagnostics(m.Chat.ID, "message", m.ID, "update", updateID, "command", name, "actor", m.UserID())
 	switch name {
+	case "as_join":
+		return a.joinCommand(ctx, m, args)
 	case "as_botban", "as_botunban", "as_botlist", "as_botget", "as_botedit":
 		return a.botBlacklistCommand(ctx, updateID, m, name, args)
 	case "start", "as_help":
