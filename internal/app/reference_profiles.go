@@ -67,5 +67,10 @@ func (a *App) lookupReferenceWithinBudget(budget context.Context, ref telegram.R
 		}
 		*requests += 1
 	}
-	return a.Telegram.LookupReference(budget, ref, known)
+	result := a.Telegram.LookupReference(budget, ref, known)
+	if result.Status == "unavailable" && budget.Err() != nil {
+		result.Status = "limit"
+		result.Error = "per-message reference query budget exhausted: " + result.Error
+	}
+	return result
 }

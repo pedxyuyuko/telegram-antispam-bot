@@ -223,3 +223,32 @@ func TestExhaustedReferenceBudgetStaysLocalToMessage(t *testing.T) {
 		t.Fatalf("expired budget became shared query failure: %+v requests=%d calls=%d", result, requests, calls.Load())
 	}
 }
+
+func TestReferenceBudgetExpiringDuringQueryStaysLocal(t *testing.T) {
+	a, _ := appFixture(t, "member")
+	release := make(chan struct{})
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	t.Cleanup(s.Close)
+	t.Cleanup(func() { close(release) })
+	cfg := a.Config.Snapshot().Telegram
+	cfg.APIBase = s.URL
+	client, err := telegram.New(cfg, "123:offline", s.Client(), 0, a.Log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.Me = a.Telegram.Me
+	a.Telegram = client
+	budget, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	ref, _ := telegram.ParseReference("@examplechannel")
+	requests := 0
+	result := a.lookupReferenceWithinBudget(budget, ref, 0, &requests)
+	if result.Status != "limit" || requests != 1 {
+		t.Fatalf("parent query budget contaminated shared cache: %+v requests=%d", result, requests)
+	}
+}
