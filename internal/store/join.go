@@ -206,8 +206,10 @@ func cancelJoinTx(ctx context.Context, tx *sql.Tx, chat int64, reason string) er
 	if _, err := tx.ExecContext(ctx, `UPDATE join_events SET status='cancelled',detail=? WHERE chat_id=? AND status IN ('pending','running')`, reason, chat); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE join_actions SET status='skipped',detail=? WHERE chat_id=? AND status IN ('pending','checking')`, reason, chat)
-	return err
+	if _, err := tx.ExecContext(ctx, `UPDATE join_actions SET status='skipped',detail=? WHERE chat_id=? AND status IN ('pending','checking')`, reason, chat); err != nil {
+		return err
+	}
+	return cancelJoinServiceTx(ctx, tx, chat, reason)
 }
 
 func (s *Store) CancelJoin(ctx context.Context, chat int64, reason string) error {
@@ -228,7 +230,7 @@ func (s *Store) ResizeJoin(ctx context.Context, cfg config.Config) error {
 		return err
 	}
 	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT chat_id FROM join_events`)
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT chat_id FROM join_events UNION SELECT DISTINCT chat_id FROM revisions WHERE json_type(snapshot,'$.join')='object'`)
 	if err != nil {
 		return err
 	}
@@ -255,6 +257,12 @@ func (s *Store) ResizeJoin(ctx context.Context, cfg config.Config) error {
 		}
 		if p.Mode != "enforce" {
 			if _, err := tx.ExecContext(ctx, `UPDATE join_actions SET status='skipped',detail='join gate record mode' WHERE chat_id=? AND status IN ('pending','checking')`, chat); err != nil {
+				return err
+			}
+		}
+		_, _, cleanupEnabled := joinDeleteRule(p)
+		if p.Mode != "enforce" || !cleanupEnabled {
+			if err := cancelJoinServiceTx(ctx, tx, chat, "join cleanup disabled or record mode"); err != nil {
 				return err
 			}
 		}

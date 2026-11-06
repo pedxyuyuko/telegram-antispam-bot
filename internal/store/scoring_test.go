@@ -182,7 +182,7 @@ func TestVersionOneDatabaseGainsEvaluationArchiveWithoutLosingEvidence(t *testin
 	var version, count int
 	s.db.QueryRow(`PRAGMA user_version`).Scan(&version)
 	s.db.QueryRow(`SELECT count(*) FROM attempts`).Scan(&count)
-	if version != 8 || count != 1 {
+	if version != 9 || count != 1 {
 		t.Fatalf("upgrade lost evidence: version=%d count=%d", version, count)
 	}
 	if _, err = s.db.Exec(`SELECT result FROM evaluations`); err != nil {

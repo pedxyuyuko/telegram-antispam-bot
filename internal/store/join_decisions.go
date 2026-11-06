@@ -146,6 +146,9 @@ func (s *Store) FinishJoin(ctx context.Context, j JoinJob, result decision.Resul
 		}
 		break
 	}
+	if err := planJoinServicesForArrivalTx(ctx, tx, j); err != nil {
+		return report, err
+	}
 	return report, tx.Commit()
 }
 

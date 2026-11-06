@@ -25,9 +25,12 @@ func joinSnapshot(mode string) JoinSnapshot {
 	return JoinSnapshot{Policy: p, Questions: q, ModelID: "m", ModelEndpoint: "http://127.0.0.1:8000"}
 }
 
-func captureMember(t *testing.T, s *Store, update, chat, user int64, old, next string) (Inbox, telegram.MembershipUpdate) {
+func captureMember(t *testing.T, s *Store, update, chat, user int64, old, next string, at ...int64) (Inbox, telegram.MembershipUpdate) {
 	t.Helper()
 	m := telegram.MembershipUpdate{Chat: telegram.Chat{ID: chat, Type: "supergroup"}, From: telegram.User{ID: 99}, Date: testNow.Unix() + update, Old: telegram.MemberState{User: telegram.User{ID: user}, Status: old}, New: telegram.MemberState{User: telegram.User{ID: user, FirstName: "member"}, Status: next}}
+	if len(at) > 0 {
+		m.Date = at[0]
+	}
 	raw, _ := json.Marshal(map[string]any{"update_id": update, "chat_member": m, "extra": "retained"})
 	if err := s.Capture(context.Background(), []json.RawMessage{raw}); err != nil {
 		t.Fatal(err)

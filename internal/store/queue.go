@@ -90,6 +90,9 @@ func (s *Store) AddRevision(ctx context.Context, in Inbox, m *telegram.Message, 
 		return ArchiveReport{}, err
 	}
 	report.LinkedActions = append(report.LinkedActions, linked...)
+	if err := planJoinServiceTx(ctx, tx, job); err != nil {
+		return ArchiveReport{}, err
+	}
 	evicted, err := trim(ctx, tx, m.Chat.ID, snapshot.Policy.QueueLimit)
 	if err != nil {
 		return ArchiveReport{}, err

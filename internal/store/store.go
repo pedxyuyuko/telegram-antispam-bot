@@ -37,6 +37,7 @@ type Snapshot struct {
 	Policy         config.Policy              `json:"policy"`
 	Questions      map[string]config.Question `json:"questions"`
 	SkipReason     string                     `json:"skip_reason,omitempty"`
+	Join           *JoinSnapshot              `json:"join,omitempty"`
 }
 type Job struct {
 	ID         int64
@@ -138,7 +139,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if version > 8 {
+	if version > 9 {
 		db.Close()
 		return nil, fmt.Errorf("unsupported database schema version %d", version)
 	}
@@ -178,6 +179,11 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if _, err := tx.Exec(joinServiceSchema); err != nil {
+		tx.Rollback()
+		db.Close()
+		return nil, err
+	}
 	if err := bootstrapBotBlacklist(context.Background(), tx); err != nil {
 		tx.Rollback()
 		db.Close()
@@ -194,6 +200,10 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	if _, err := db.Exec(`UPDATE join_events SET status='pending' WHERE status='running'; UPDATE join_actions SET status='pending' WHERE status='checking'; UPDATE join_actions SET status='uncertain',detail='process stopped during dispatch' WHERE status='executing'`); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if _, err := db.Exec(`UPDATE join_service_actions SET status='pending' WHERE status='checking'; UPDATE join_service_actions SET status='uncertain',detail='process stopped during dispatch' WHERE status='executing'`); err != nil {
 		db.Close()
 		return nil, err
 	}
