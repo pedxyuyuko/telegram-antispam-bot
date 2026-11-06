@@ -71,6 +71,7 @@ type Config struct {
 	QuestionGroups map[string]map[string]Question `json:"question_groups,omitempty"`
 	Base           Policy                         `json:"base"`
 	Groups         map[string]json.RawMessage     `json:"groups"`
+	JoinGate       *JoinGate                      `json:"join_gate,omitempty"`
 }
 
 // Defaults is safe to inspect offline. A served model name and owners are required
@@ -161,7 +162,7 @@ func (c Config) Validate() error {
 			return fmt.Errorf("group %s: %w", id, err)
 		}
 	}
-	return nil
+	return c.validateJoinGate()
 }
 
 func (c Config) validatePolicy(p Policy) error {
@@ -305,6 +306,19 @@ func Decode(raw []byte) (Config, error) {
 			c.Base.Rules = nil
 		}
 	}
+	if gate, present := root["join_gate"]; present {
+		c.JoinGate = &JoinGate{Base: DefaultJoinPolicy(), Groups: map[string]json.RawMessage{}}
+		var fields struct {
+			Base   map[string]json.RawMessage `json:"base"`
+			Groups json.RawMessage            `json:"groups"`
+		}
+		if err := strict(gate, &fields); err != nil {
+			return Config{}, err
+		}
+		if _, present := fields.Base["rules"]; present {
+			c.JoinGate.Base.Rules = nil
+		}
+	}
 	if err := strict(raw, &c); err != nil {
 		return Config{}, err
 	}
@@ -446,6 +460,10 @@ func (m *Manager) Set(chat *int64, path string, value json.RawMessage) error {
 func (m *Manager) Reset(chat int64, path string) error { return m.change(&chat, path, nil, true) }
 
 func (m *Manager) change(chat *int64, path string, value json.RawMessage, remove bool) error {
+	return m.changePolicy(chat, path, value, remove, false)
+}
+
+func (m *Manager) changePolicy(chat *int64, path string, value json.RawMessage, remove, join bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	parts := strings.Split(path, ".")
@@ -464,8 +482,18 @@ func (m *Manager) change(chat *int64, path string, value json.RawMessage, remove
 	copyRaw, _ := json.Marshal(m.config)
 	var c Config
 	_ = json.Unmarshal(copyRaw, &c)
+	if join && c.JoinGate == nil {
+		return errors.New("join_gate is not configured; add its configuration and reload")
+	}
 	var target json.RawMessage
-	if chat == nil {
+	if join && chat == nil {
+		target, _ = json.Marshal(c.JoinGate.Base)
+	} else if join {
+		target = c.JoinGate.Groups[strconv.FormatInt(*chat, 10)]
+		if target == nil {
+			target = json.RawMessage(`{}`)
+		}
+	} else if chat == nil {
 		target, _ = json.Marshal(c.Base)
 	} else {
 		target = c.Groups[strconv.FormatInt(*chat, 10)]
@@ -477,7 +505,18 @@ func (m *Manager) change(chat *int64, path string, value json.RawMessage, remove
 	if err != nil {
 		return err
 	}
-	if chat == nil {
+	if join && chat == nil {
+		var policy JoinPolicy
+		if err := strict(target, &policy); err != nil {
+			return err
+		}
+		c.JoinGate.Base = policy
+	} else if join {
+		if c.JoinGate.Groups == nil {
+			c.JoinGate.Groups = map[string]json.RawMessage{}
+		}
+		c.JoinGate.Groups[strconv.FormatInt(*chat, 10)] = target
+	} else if chat == nil {
 		var policy Policy
 		if err := strict(target, &policy); err != nil {
 			return err
