@@ -76,10 +76,10 @@ func TestExampleProvidesGroupedScoringOutsideRepository(t *testing.T) {
 			t.Fatalf("removed question %s remains selectable in the example", removed)
 		}
 	}
-	if len(c.QuestionGroups) != 3 {
-		t.Fatalf("want three focused question groups, got %d", len(c.QuestionGroups))
+	if len(c.QuestionGroups) != 4 {
+		t.Fatalf("want four focused question groups, got %d", len(c.QuestionGroups))
 	}
-	for _, group := range []string{"content", "profile", "target"} {
+	for _, group := range []string{"content", "profile", "target", "join"} {
 		p := c.Base
 		p.Questions = []string{group + ".*"}
 		questions, err := c.SelectedQuestions(p)
@@ -111,6 +111,34 @@ func TestExampleProvidesGroupedScoringOutsideRepository(t *testing.T) {
 	e, err := decision.EvaluatePolicy(questions, c.Base, decision.Result{Probabilities: p})
 	if err != nil || e.Score != 100 || e.Condition != expression.True {
 		t.Fatalf("generated example lost custom scoring: %+v %v", e, err)
+	}
+}
+
+func TestExampleJoinGateStartsDisabledAndScoresIndependentProfileAnswers(t *testing.T) {
+	var out, logs bytes.Buffer
+	if err := run(context.Background(), []string{"-example"}, &out, &logs); err != nil {
+		t.Fatal(err)
+	}
+	c, err := config.Decode(out.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.JoinGate == nil {
+		t.Fatal("join gate missing from example")
+	}
+	p := c.ForJoinGroup(-100)
+	if p.Enabled || p.Mode != "record" {
+		t.Fatal("example enables join punishment")
+	}
+	q, err := c.SelectedQuestions(p.Policy)
+	if err != nil || len(q) != 4 {
+		t.Fatal("join question selection missing")
+	}
+	for _, tc := range []struct{ promotion, money, sexual, earnings, score float64 }{{.85, .85, 0, 0, 100}, {.85, 0, .85, 0, 100}, {.849, 1, 1, 1, 0}, {1, 0, 0, 1, 0}} {
+		e, err := decision.EvaluatePolicy(q, p.Policy, decision.Result{Probabilities: map[string]float64{"join.promotion": tc.promotion, "join.money": tc.money, "join.sexual": tc.sexual, "join.earnings": tc.earnings}})
+		if err != nil || e.Score != tc.score {
+			t.Fatalf("join scoring=%+v %v", e, err)
+		}
 	}
 }
 
