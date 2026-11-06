@@ -94,6 +94,9 @@ func TestImageHasNonRootDefaultsAndHTTPSRoots(t *testing.T) {
 	if c.JoinGate == nil || join.Enabled || join.Mode != "record" || err != nil || len(joinQuestions) != 4 {
 		t.Fatal("image example lost the disabled independent join gate")
 	}
+	if r := join.Rules["delete_join_message"]; !r.Enabled || r.Action != "delete" {
+		t.Fatal("image example lost join-message cleanup")
+	}
 	if c.Base.Scoring == nil || c.Base.Condition == "" || len(c.QuestionGroups) != 4 {
 		t.Fatal("image example lost the grouped scoring configuration")
 	}
@@ -169,7 +172,7 @@ func testPersistentRuntime(t *testing.T, useCompose bool) {
 				}
 			}
 			if batches.Add(1) == 1 {
-				fmt.Fprint(w, `{"ok":true,"result":[{"update_id":501,"message":{"message_id":1,"date":1,"chat":{"id":9,"type":"private"},"from":{"id":9,"first_name":"Owner"},"text":"/as_set base debug true"}},{"update_id":502,"message":{"message_id":2,"date":1,"chat":{"id":-100,"type":"supergroup"},"from":{"id":42,"first_name":"Admin"},"text":"/as_set queue_limit 7"}},{"update_id":503,"message":{"message_id":3,"date":1,"chat":{"id":-100,"type":"supergroup"},"from":{"id":50,"first_name":"User"},"text":"sample advertisement","future_field":"retained"}},{"update_id":504,"chat_member":{"chat":{"id":-100,"type":"supergroup"},"from":{"id":42,"first_name":"Admin"},"date":1,"old_chat_member":{"status":"left","user":{"id":50,"first_name":"User"}},"new_chat_member":{"status":"member","user":{"id":50,"first_name":"User"}}}}]}`)
+				fmt.Fprint(w, `{"ok":true,"result":[{"update_id":501,"message":{"message_id":1,"date":1,"chat":{"id":9,"type":"private"},"from":{"id":9,"first_name":"Owner"},"text":"/as_set base debug true"}},{"update_id":502,"message":{"message_id":2,"date":1,"chat":{"id":-100,"type":"supergroup"},"from":{"id":42,"first_name":"Admin"},"text":"/as_set queue_limit 7"}},{"update_id":503,"message":{"message_id":3,"date":1,"chat":{"id":-100,"type":"supergroup"},"from":{"id":50,"first_name":"User"},"text":"sample advertisement","future_field":"retained"}},{"update_id":504,"chat_member":{"chat":{"id":-100,"type":"supergroup"},"from":{"id":42,"first_name":"Admin"},"date":1,"old_chat_member":{"status":"left","user":{"id":50,"first_name":"User"}},"new_chat_member":{"status":"member","user":{"id":50,"first_name":"User"}}}},{"update_id":505,"message":{"message_id":4,"date":1,"chat":{"id":-100,"type":"supergroup"},"from":{"id":42,"first_name":"Admin"},"new_chat_members":[{"id":50,"first_name":"User"}],"future_field":"join-retained"}}]}`)
 			} else {
 				select {
 				case <-r.Context().Done():
@@ -274,7 +277,10 @@ func testPersistentRuntime(t *testing.T, useCompose bool) {
 		if db.QueryRow(`SELECT count(*) FROM attempts WHERE error=''`).Scan(&n) != nil || n != 1 {
 			return false
 		}
-		return db.QueryRow(`SELECT count(*) FROM join_actions WHERE status='recorded'`).Scan(&n) == nil && n == 1
+		if db.QueryRow(`SELECT count(*) FROM join_actions WHERE status='recorded'`).Scan(&n) != nil || n != 1 {
+			return false
+		}
+		return db.QueryRow(`SELECT count(*) FROM join_service_actions WHERE status='recorded'`).Scan(&n) == nil && n == 1
 	}, func() string { return string(command(t, engine, "logs", containerName)) })
 	// A read-only validation helper shares the same directory with the live bot.
 	// A shared SELinux label keeps that helper from invalidating the live mount.
@@ -291,7 +297,7 @@ func testPersistentRuntime(t *testing.T, useCompose bool) {
 	command(t, engine, "start", containerName)
 	select {
 	case offset := <-resumed:
-		if offset != 505 {
+		if offset != 506 {
 			t.Fatalf("lost checkpoint: offset=%d", offset)
 		}
 	case <-time.After(15 * time.Second):
@@ -313,10 +319,13 @@ func testPersistentRuntime(t *testing.T, useCompose bool) {
 	if err := db.QueryRow(`SELECT count(*) FROM attempts`).Scan(&attempts); err != nil {
 		t.Fatal(err)
 	}
-	if updates != 4 || attempts != 1 {
+	if updates != 5 || attempts != 1 {
 		t.Fatalf("restart lost or duplicated evidence: updates=%d attempts=%d", updates, attempts)
 	}
 	var joins int
+	if err := db.QueryRow(`SELECT count(*) FROM join_service_actions WHERE status='recorded'`).Scan(&joins); err != nil || joins != 1 {
+		t.Fatalf("cleanup observation lost across restart: %d %v", joins, err)
+	}
 	if err := db.QueryRow(`SELECT count(*) FROM join_attempts WHERE error='' AND json_extract(evaluation,'$.score')=100 AND json_extract(request,'$.state.member.bio')='public profile'`).Scan(&joins); err != nil || joins != 1 {
 		t.Fatalf("join evidence lost or repeated across restart: %d %v", joins, err)
 	}
