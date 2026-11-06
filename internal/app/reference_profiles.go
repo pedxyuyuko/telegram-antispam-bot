@@ -54,7 +54,7 @@ func (a *App) referencedProfiles(ctx context.Context, j store.Job, m *telegram.M
 			continue
 		}
 		out[ref.Key] = stored.Lookup.Profile
-		if entry.depth == 0 {
+		if entry.depth == 0 && ref.ExpandBio {
 			for _, next := range telegram.ReferencesInText(stored.Lookup.Profile.Bio) {
 				if !seen[next.Key] {
 					seen[next.Key] = true

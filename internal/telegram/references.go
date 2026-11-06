@@ -8,7 +8,10 @@ import (
 	"strings"
 )
 
-type Reference struct{ Key, Username, URL string }
+type Reference struct {
+	Key, Username, URL string
+	ExpandBio          bool
+}
 type ReferenceProfile struct {
 	Username string `json:"username,omitempty"`
 	Name     string `json:"name,omitempty"`
@@ -170,12 +173,19 @@ func ReferencesInText(text string) []Reference {
 
 func (m *Message) References(profile Profile) []Reference {
 	var refs []Reference
-	seen := map[string]bool{}
-	add := func(value string) {
-		if ref, ok := ParseReference(value); ok && !seen[ref.Key] {
-			refs = append(refs, ref)
-			seen[ref.Key] = true
+	seen := map[string]int{}
+	add := func(value string, expand bool) {
+		ref, ok := ParseReference(value)
+		if !ok {
+			return
 		}
+		if index, exists := seen[ref.Key]; exists {
+			refs[index].ExpandBio = refs[index].ExpandBio || expand
+			return
+		}
+		ref.ExpandBio = expand
+		seen[ref.Key] = len(refs)
+		refs = append(refs, ref)
 	}
 	for _, part := range []struct {
 		text     string
@@ -186,20 +196,20 @@ func (m *Message) References(profile Profile) []Reference {
 			if value == "" {
 				value = part.text[span.start:span.end]
 			}
-			add(value)
+			add(value, span.kind == "mention")
 		}
 	}
 	if body, err := m.contextBody(); err == nil {
 		if buttons, ok := body["buttons"].([]contextButton); ok {
 			links, _ := body["links"].(map[string]string)
 			for _, button := range buttons {
-				add(links[button.Link])
+				add(links[button.Link], false)
 			}
 		}
 	}
 	for _, text := range []string{profile.Bio, profile.Description} {
 		for _, ref := range ReferencesInText(text) {
-			add(ref.URL)
+			add(ref.URL, false)
 		}
 	}
 	return refs

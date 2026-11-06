@@ -188,3 +188,23 @@ func TestUnavailableMentionProfilePreventsContentCachePublication(t *testing.T) 
 		t.Fatal("unavailable target profile became a reusable content decision")
 	}
 }
+
+func TestReferenceExpansionStopsAtTheRequestedChatProfile(t *testing.T) {
+	for _, tc := range []struct {
+		text string
+		want int32
+	}{{"https://t.me/examplechannel", 1}, {"@examplechannel", 2}} {
+		t.Run(tc.text, func(t *testing.T) {
+			a, path := appFixture(t, "member")
+			modelFixture(t, a, path, nil)
+			var bio atomic.Value
+			bio.Store("more https://t.me/childchannel")
+			calls := referenceGateway(t, a, &bio)
+			deliver(t, a, 1, message(50, tc.text))
+			runModel(t, a, time.Now())
+			if calls.Load() != tc.want {
+				t.Fatalf("profile expansion calls=%d want %d", calls.Load(), tc.want)
+			}
+		})
+	}
+}
