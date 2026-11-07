@@ -70,10 +70,12 @@ type Client struct {
 	ttl      time.Duration
 	mu       sync.Mutex
 	profiles map[int64]cachedProfile
+	files    *http.Client
+	apiBase  string
 }
 
 func New(cfg config.Telegram, token string, httpClient bot.HttpClient, lastID int64, log *slog.Logger) (*Client, error) {
-	c := &Client{token: token, ttl: time.Duration(cfg.ProfileCacheSeconds) * time.Second, profiles: map[int64]cachedProfile{}}
+	c := &Client{token: token, ttl: time.Duration(cfg.ProfileCacheSeconds) * time.Second, profiles: map[int64]cachedProfile{}, files: imageHTTPClient(httpClient), apiBase: cfg.APIBase}
 	b, err := bot.New(token, bot.WithSkipGetMe(), bot.WithServerURL(cfg.APIBase),
 		bot.WithHTTPClient(time.Duration(cfg.PollTimeoutSeconds)*time.Second, httpClient),
 		bot.WithAllowedUpdates(bot.AllowedUpdates{"message", "edited_message", "chat_member"}), bot.WithInitialOffset(lastID),
