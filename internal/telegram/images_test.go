@@ -142,6 +142,25 @@ func TestImageLookupDoesNotFollowRedirectsOrReadOversizedFiles(t *testing.T) {
 	}
 }
 
+func TestImageAuditRedactsCredentialsEchoedInReturnedFilePaths(t *testing.T) {
+	for _, p := range []string{"/local/bot123:secret/photos/f.png", "https://example.test/bot123%3Asecret/photos/f.png"} {
+		c := imageClient(t, func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"file_id": "f", "file_unique_id": "u", "file_path": p}})
+		})
+		lookup := c.LookupImage(context.Background(), ImageSource{Kind: "photo", FileID: "f", FileUniqueID: "u"})
+		raw, err := json.Marshal(lookup)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(raw, []byte("123:secret")) || bytes.Contains(raw, []byte("123%3Asecret")) {
+			t.Fatal("upstream file path copied a credential into image audit")
+		}
+		if lookup.Status == "available" {
+			t.Fatal("absolute file path accepted")
+		}
+	}
+}
+
 func TestCancelledImageBudgetKeepsTextAndAvoidsFileRequests(t *testing.T) {
 	var calls atomic.Int32
 	c := imageClient(t, func(w http.ResponseWriter, r *http.Request) { calls.Add(1) })

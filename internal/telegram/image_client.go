@@ -73,6 +73,13 @@ func (c *Client) LookupImage(ctx context.Context, source ImageSource) (result Im
 		return result
 	}
 	result.Response, _ = json.Marshal(file)
+	// Local gateways may echo credential-bearing absolute paths. Retain the
+	// parsed response with transport credentials removed before it is archived.
+	for _, secret := range []string{c.token, url.PathEscape(c.token), url.QueryEscape(c.token), strings.ReplaceAll(url.QueryEscape(c.token), "%3A", "%3a")} {
+		if secret != "" {
+			result.Response = json.RawMessage(strings.ReplaceAll(string(result.Response), secret, "[redacted]"))
+		}
+	}
 	if file == nil || file.FileID == "" || (source.FileUniqueID != "" && file.FileUniqueID != source.FileUniqueID) {
 		result.Error = "returned file identity does not match image source"
 		return result
