@@ -41,7 +41,7 @@ func responseError(status int, body []byte, hasImages bool) error {
 	if status == 400 || status == 413 {
 		var detail string
 		if json.Unmarshal(envelope.Detail, &detail) == nil && detail != "" {
-			e.imageFailure = true
+			e.imageFailure = imageValidationDetail(detail)
 		}
 		return e
 	}
@@ -73,4 +73,19 @@ func responseError(status int, body []byte, hasImages bool) error {
 	}
 	e.imageFailure = true
 	return e
+}
+
+func imageValidationDetail(detail string) bool {
+	msg := strings.ToLower(detail)
+	for _, configuration := range []string{"unknown model", "invalid model", "model name", "model not found", "api key", "credential", "unauthorized", "authentication"} {
+		if strings.Contains(msg, configuration) {
+			return false
+		}
+	}
+	for _, image := range []string{"image", "asset", "base64", "pixel", "dimension", "width", "height", "png", "jpeg", "webp"} {
+		if strings.Contains(msg, image) {
+			return true
+		}
+	}
+	return (strings.Contains(msg, "body") || strings.Contains(msg, "expanded request")) && (strings.Contains(msg, "large") || strings.Contains(msg, "limit") || strings.Contains(msg, "exceed"))
 }

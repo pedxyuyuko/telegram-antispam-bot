@@ -75,6 +75,7 @@ func TestImageRejectionDistinguishesImageFailuresFromConfigurationAndOutages(t *
 		fallback bool
 	}{
 		{400, `{"detail":"invalid image"}`, true}, {413, `{"detail":"image too large"}`, true},
+		{400, `{"detail":"unknown model"}`, false}, {400, `{"detail":"invalid API key"}`, false}, {413, `{"detail":"backend overloaded"}`, false}, {400, `{"detail":"invalid request"}`, false},
 		{422, `{"detail":[{"loc":["body","state"],"msg":"vision encoder unavailable","type":"value_error"}]}`, true},
 		{422, `{"detail":[{"loc":["body","assets","ref"],"msg":"invalid asset","type":"value_error"}]}`, true},
 		{422, `{"detail":[{"loc":["body","questions"],"msg":"state exceeds max token limit","type":"value_error"}]}`, true},
