@@ -3,6 +3,11 @@
   "model": {"base_url": "http://127.0.0.1:8000", "name": "replace-with-served-model-name"},
   "question_groups": {
     "content": {
+      "illicit": {
+        "type": "noul",
+        "instructions": "仅根据 JSON 顶层 .message 的文字、配文、按钮和图片内容，当前消息是否在提供或招揽以下任一类商品或服务：查人、查手机号、查个人信息、开盒、色情资源或色情服务、赌博博彩、毒品交易、洗钱或跑分？免费查询或体验、引导私聊或进群办理也属于招揽。普通讨论、合规开户、新闻、反诈、举报和寻人求助归为正常。片段内 profile 的资料由 target 题组判断。",
+        "criteria": {"true": "当前消息的文字或图片中，发言者主动提供、推销或引流到上述任一类商品或服务，免费查询或体验也算。", "false": "当前消息主要用于普通交流、合规业务、新闻、反诈、举报、求助、寻人启事或引用讨论。"}
+      },
       "promotion": {
         "type": "noul",
         "instructions": "在 JSON 顶层 .message 数组里，各片段的 text、配文、按钮文字和图片内容是否在宣传或招揽？片段内的 profile 是被提及对象的附加资料，单独由 target 题组判断。",
@@ -83,7 +88,7 @@
     "min_confidence": 0.75,
     "on_low_confidence": "abstain_question",
     "questions": [
-      "content.promotion", "content.money", "content.earnings", "content.sexual",
+      "content.promotion", "content.money", "content.earnings", "content.sexual", "content.illicit",
       "profile.promotion", "profile.money", "profile.earnings", "profile.sexual",
       "target.invocation", "target.promotion", "target.money", "target.earnings", "target.sexual"
     ],
@@ -91,7 +96,8 @@
       "initial": 0,
       "rules": [
         {"name": "消息宣传金钱或色情", "when": "p.content.promotion >= 0.83 && (p.content.money >= 0.85 || p.content.sexual >= 0.85)", "add": 100},
-        {"name": "资料宣传金钱或色情", "when": "p.profile.promotion >= 0.85 && (p.profile.money >= 0.85 || p.profile.sexual >= 0.85)", "add": 100}
+        {"name": "资料宣传金钱或色情", "when": "p.profile.promotion >= 0.85 && (p.profile.money >= 0.85 || p.profile.sexual >= 0.85)", "add": 100},
+        {"name": "消息招揽黑灰产业务", "when": "p.content.illicit >= 0.85", "add": 100}
       ]
     },
     "condition": "score >= 100",

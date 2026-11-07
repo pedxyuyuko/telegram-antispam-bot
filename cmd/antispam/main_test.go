@@ -84,7 +84,7 @@ func TestExampleProvidesGroupedScoringOutsideRepository(t *testing.T) {
 		p.Questions = []string{group + ".*"}
 		questions, err := c.SelectedQuestions(p)
 		want := 4
-		if group == "target" {
+		if group == "target" || group == "content" {
 			want = 5
 		}
 		if err != nil || len(questions) != want {
@@ -103,8 +103,8 @@ func TestExampleProvidesGroupedScoringOutsideRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(questions) != 13 {
-		t.Fatalf("want thirteen selected questions, got %d", len(questions))
+	if len(questions) != 14 {
+		t.Fatalf("want fourteen selected questions, got %d", len(questions))
 	}
 	p := map[string]float64{}
 	for id := range questions {
@@ -175,6 +175,9 @@ func TestGroupedExampleValidatesAndScoresRepresentativeMessages(t *testing.T) {
 		{"promotion_without_topic", map[string]float64{"content.promotion": .99}, 0},
 		{"message_money_boundary", map[string]float64{"content.promotion": .83, "content.money": .85}, 100},
 		{"message_sexual_boundary", map[string]float64{"content.promotion": .83, "content.sexual": .85}, 100},
+		{"illicit_solicitation_independent_boundary", map[string]float64{"content.illicit": .85}, 100},
+		{"illicit_below_boundary", map[string]float64{"content.illicit": .84999}, 0},
+		{"illicit_and_money_terms", map[string]float64{"content.illicit": .99, "content.promotion": .83, "content.money": .85}, 200},
 		{"profile_money_boundary", map[string]float64{"profile.promotion": .85, "profile.money": .85}, 100},
 		{"profile_sexual_boundary", map[string]float64{"profile.promotion": .85, "profile.sexual": .85}, 100},
 		{"promotion_below_boundary", map[string]float64{"content.promotion": .82999, "content.money": .99}, 0},
@@ -209,8 +212,8 @@ func TestGroupedExampleValidatesAndScoresRepresentativeMessages(t *testing.T) {
 	for _, id := range []int64{-1001234567890, -1009876543210} {
 		p := c.ForGroup(id)
 		selected, err := c.SelectedQuestions(p)
-		if err != nil || len(selected) != 13 {
-			t.Fatalf("group %d lost the thirteen-question policy: %v", id, err)
+		if err != nil || len(selected) != 14 {
+			t.Fatalf("group %d lost the fourteen-question policy: %v", id, err)
 		}
 	}
 }
