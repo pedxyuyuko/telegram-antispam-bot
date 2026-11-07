@@ -180,3 +180,18 @@ func TestExplicitQuestionSetReplacesDefaults(t *testing.T) {
 		t.Fatal("explicit dictionaries inherited unwanted defaults")
 	}
 }
+
+func TestImageInferenceTimeoutHasIndependentValidatedDefault(t *testing.T) {
+	c, err := Decode([]byte(`{"owner_ids":[9],"model":{"name":"m","image_timeout_seconds":90}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Model.ImageTimeoutSeconds != 90 || c.Model.TimeoutSeconds != 20 {
+		t.Fatal("image timeout replaced text timeout")
+	}
+	for _, value := range []string{"0", "3601"} {
+		if _, err := Decode([]byte(`{"owner_ids":[9],"model":{"name":"m","image_timeout_seconds":` + value + `}}`)); err == nil {
+			t.Fatal("invalid image timeout accepted")
+		}
+	}
+}

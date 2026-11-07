@@ -14,12 +14,18 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"telegram-antispam-bot/internal/config"
+	"telegram-antispam-bot/internal/vision"
 )
 
-type Client struct{ HTTP *http.Client }
+type Client struct {
+	HTTP       *http.Client
+	serialOnce sync.Once
+	serial     chan struct{}
+}
 
 type Result struct {
 	ModelID       string
@@ -41,6 +47,10 @@ type Answer struct {
 }
 
 func (c *Client) Evaluate(ctx context.Context, cfg config.Model, questions map[string]config.Question, state json.RawMessage) (result Result, err error) {
+	return c.EvaluateWithAssets(ctx, cfg, questions, state, nil)
+}
+
+func (c *Client) EvaluateWithAssets(ctx context.Context, cfg config.Model, questions map[string]config.Question, state json.RawMessage, assets vision.Assets) (result Result, err error) {
 	result.ModelID, result.ModelEndpoint = cfg.Name, strings.TrimRight(cfg.BaseURL, "/")
 	start := time.Now()
 	defer func() { result.Duration = time.Since(start) }()
@@ -48,17 +58,38 @@ func (c *Client) Evaluate(ctx context.Context, cfg config.Model, questions map[s
 		Model     string                     `json:"model"`
 		State     json.RawMessage            `json:"state"`
 		Questions map[string]config.Question `json:"questions"`
-	}{cfg.Name, state, questions})
+		Assets    vision.Assets              `json:"assets,omitempty"`
+	}{cfg.Name, state, questions, assets})
 	if err != nil {
 		return result, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.TimeoutSeconds)*time.Second)
+	if len(result.Request) > 32<<20 {
+		return result, &modelHTTPError{status: 413, imageFailure: len(assets) > 0, localLimit: true}
+	}
+	c.serialOnce.Do(func() { c.serial = make(chan struct{}, 1) })
+	select {
+	case c.serial <- struct{}{}:
+		defer func() { <-c.serial }()
+	case <-ctx.Done():
+		return result, ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
+	timeout := cfg.TimeoutSeconds
+	if len(assets) > 0 && cfg.ImageTimeoutSeconds > timeout {
+		timeout = cfg.ImageTimeoutSeconds
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(cfg.BaseURL, "/")+"/v1/systemone", bytes.NewReader(result.Request))
 	if err != nil {
 		return result, errors.New("invalid model endpoint")
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if len(assets) > 0 {
+		req.Header.Set("TypeSafe-Danger-Zone-Images", "true")
+	}
 	if key := os.Getenv(cfg.APIKeyEnv); key != "" {
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
@@ -81,7 +112,7 @@ func (c *Client) Evaluate(ctx context.Context, cfg config.Model, questions map[s
 		return result, fmt.Errorf("model response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return result, fmt.Errorf("model HTTP status %d", resp.StatusCode)
+		return result, responseError(resp.StatusCode, result.Response, len(assets) > 0)
 	}
 	var body struct {
 		Model   string                     `json:"model"`

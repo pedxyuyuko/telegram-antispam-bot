@@ -48,11 +48,12 @@ type Policy struct {
 }
 
 type Model struct {
-	BaseURL        string `json:"base_url"`
-	Name           string `json:"name"`
-	APIKeyEnv      string `json:"api_key_env"`
-	TimeoutSeconds int    `json:"timeout_seconds"`
-	RetrySeconds   int    `json:"retry_seconds"`
+	BaseURL             string `json:"base_url"`
+	Name                string `json:"name"`
+	APIKeyEnv           string `json:"api_key_env"`
+	TimeoutSeconds      int    `json:"timeout_seconds"`
+	ImageTimeoutSeconds int    `json:"image_timeout_seconds"`
+	RetrySeconds        int    `json:"retry_seconds"`
 }
 
 type Telegram struct {
@@ -81,7 +82,7 @@ func Defaults() Config {
 	return Config{
 		Database: "data/bot.sqlite",
 		Telegram: Telegram{"TELEGRAM_BOT_TOKEN", "https://api.telegram.org", 30, 300},
-		Model:    Model{BaseURL: "http://127.0.0.1:8000", APIKeyEnv: "SYSTEMONE_API_KEY", TimeoutSeconds: 20, RetrySeconds: 10},
+		Model:    Model{BaseURL: "http://127.0.0.1:8000", APIKeyEnv: "SYSTEMONE_API_KEY", TimeoutSeconds: 20, ImageTimeoutSeconds: 60, RetrySeconds: 10},
 		Questions: map[string]Question{
 			"promotion": {Type: "noul", Instructions: prefix + "当前消息是否在推广、招揽、拉群、引导私聊或交易？识别发言者本人的意图，区分引用他人话语。"},
 			"fraud":     {Type: "noul", Instructions: prefix + "当前消息是否呈现诈骗诱导特征，例如冒充可信身份、骗取凭据、诱导转账或虚假奖励？以可观察的内容为依据。"},
@@ -124,6 +125,9 @@ func (c Config) Validate() error {
 	}
 	if !endpoint(c.Model.BaseURL) || strings.TrimSpace(c.Model.Name) == "" || c.Model.TimeoutSeconds < 1 || c.Model.TimeoutSeconds > 3600 || c.Model.RetrySeconds < 1 || c.Model.RetrySeconds > 86400 {
 		return errors.New("invalid model endpoint, name or timeouts")
+	}
+	if c.Model.ImageTimeoutSeconds < 1 || c.Model.ImageTimeoutSeconds > 3600 {
+		return errors.New("image_timeout_seconds must be between 1 and 3600")
 	}
 	for id, q := range c.Questions {
 		if !identifier.MatchString(id) {
