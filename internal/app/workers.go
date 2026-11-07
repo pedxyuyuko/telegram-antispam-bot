@@ -131,7 +131,11 @@ func (a *App) ProcessModel(ctx context.Context, now time.Time) (bool, error) {
 			}
 		}
 		debug(diagnostic, "context.ready", "reused", reused, "state_bytes", len(j.State))
-		debug(diagnostic, "model.started", "model", cfg.Model.Name, "question_count", len(j.Snapshot.Questions), "questions", questionIDs(j.Snapshot.Questions), "timeout_seconds", cfg.Model.TimeoutSeconds)
+		timeout := cfg.Model.TimeoutSeconds
+		if len(j.Assets) > 0 {
+			timeout = cfg.Model.ImageTimeoutSeconds
+		}
+		debug(diagnostic, "model.started", "model", cfg.Model.Name, "question_count", len(j.Snapshot.Questions), "questions", questionIDs(j.Snapshot.Questions), "timeout_seconds", timeout, "image_count", len(j.Assets))
 		var auditErr error
 		result, inferenceErr, auditErr = a.evaluateMessage(ctx, *j, cfg.Model, diagnostic)
 		if auditErr != nil {

@@ -10,6 +10,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -273,4 +274,27 @@ func TestOldSegmentedPendingPhotoRetainsMetadataOnlyInput(t *testing.T) {
 	if _, err := a.Store.ImageAssets(context.Background(), 1); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestVisualDiagnosticsReportTheActualImageDeadline(t *testing.T) {
+	a, path, _ := imageApp(t)
+	var logs bytes.Buffer
+	a.Log = slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	cfg := a.Config.Snapshot()
+	cfg.Base.Debug = true
+	cfg.Model.TimeoutSeconds = 120
+	cfg.Model.ImageTimeoutSeconds = 30
+	saveScoringConfig(t, a, path, cfg)
+	deliverRawMessage(t, a, 1, visualMessageRaw(1, "photo"))
+	runModel(t, a, time.Now())
+	for _, line := range bytes.Split(logs.Bytes(), []byte("\n")) {
+		var event map[string]any
+		if json.Unmarshal(line, &event) == nil && event["event"] == "model.started" {
+			if event["timeout_seconds"] != float64(30) || event["image_count"] != float64(1) {
+				t.Fatalf("wrong visual request diagnostics: %s", line)
+			}
+			return
+		}
+	}
+	t.Fatal("model.started diagnostic missing")
 }
