@@ -77,7 +77,7 @@ func (c *Client) EvaluateWithAssets(ctx context.Context, cfg config.Model, quest
 		return result, err
 	}
 	timeout := cfg.TimeoutSeconds
-	if len(assets) > 0 && cfg.ImageTimeoutSeconds > timeout {
+	if len(assets) > 0 && cfg.ImageTimeoutSeconds > 0 {
 		timeout = cfg.ImageTimeoutSeconds
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
