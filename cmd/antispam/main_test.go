@@ -94,6 +94,9 @@ func TestExampleProvidesGroupedScoringOutsideRepository(t *testing.T) {
 			if len(q.Criteria) == 0 {
 				t.Fatalf("question %s lost its answer criteria", id)
 			}
+			if group == "content" && (!strings.Contains(q.Instructions, "图片内容") || !bytes.Contains(q.Criteria, []byte("图片"))) {
+				t.Fatalf("question %s omits visible image material", id)
+			}
 		}
 	}
 	questions, err := c.SelectedQuestions(c.Base)

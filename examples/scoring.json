@@ -5,23 +5,23 @@
     "content": {
       "promotion": {
         "type": "noul",
-        "instructions": "在 JSON 顶层 .message 数组里，各片段的 text、配文和按钮文字是否在宣传或招揽？片段内的 profile 是被提及对象的附加资料，单独由 target 题组判断。",
-        "criteria": {"true": ".message 中当前消息的正文、配文或按钮文字在宣传或招揽。", "false": ".message 的当前消息文字没有宣传和招揽。"}
+        "instructions": "在 JSON 顶层 .message 数组里，各片段的 text、配文、按钮文字和图片内容是否在宣传或招揽？片段内的 profile 是被提及对象的附加资料，单独由 target 题组判断。",
+        "criteria": {"true": ".message 中当前消息的正文、配文、按钮文字或图片内容在宣传或招揽。", "false": ".message 的当前消息文字和图片没有宣传和招揽。"}
       },
       "money": {
         "type": "noul",
-        "instructions": "在 JSON 顶层 .message 数组里，各片段的 text、配文和按钮文字是否涉及金钱？片段内的 profile 是被提及对象的附加资料，单独由 target 题组判断。",
-        "criteria": {"true": ".message 中当前消息的正文、配文或按钮文字中有金钱相关内容。", "false": ".message 的当前消息文字中没有金钱相关内容。"}
+        "instructions": "在 JSON 顶层 .message 数组里，各片段的 text、配文、按钮文字和图片内容是否涉及金钱？片段内的 profile 是被提及对象的附加资料，单独由 target 题组判断。",
+        "criteria": {"true": ".message 中当前消息的正文、配文、按钮文字或图片内容中有金钱相关内容。", "false": ".message 的当前消息文字和图片中没有金钱相关内容。"}
       },
       "earnings": {
         "type": "noul",
-        "instructions": "在 JSON 顶层 .message 数组里，各片段的 text、配文和按钮文字是否承诺读者能够赚钱？片段内的 profile 是被提及对象的附加资料，单独由 target 题组判断。",
-        "criteria": {"true": ".message 中当前消息的正文、配文或按钮文字承诺读者能够赚钱。", "false": ".message 的当前消息文字没有赚钱承诺。"}
+        "instructions": "在 JSON 顶层 .message 数组里，各片段的 text、配文、按钮文字和图片内容是否承诺读者能够赚钱？片段内的 profile 是被提及对象的附加资料，单独由 target 题组判断。",
+        "criteria": {"true": ".message 中当前消息的正文、配文、按钮文字或图片内容承诺读者能够赚钱。", "false": ".message 的当前消息文字和图片没有赚钱承诺。"}
       },
       "sexual": {
         "type": "noul",
-        "instructions": "在 JSON 顶层 .message 数组里，各片段的 text、配文和按钮文字是否涉及色情？片段内的 profile 是被提及对象的附加资料，单独由 target 题组判断。",
-        "criteria": {"true": ".message 中当前消息的正文、配文或按钮文字中有色情相关内容。", "false": ".message 的当前消息文字中没有色情相关内容。"}
+        "instructions": "在 JSON 顶层 .message 数组里，各片段的 text、配文、按钮文字和图片内容是否涉及色情？片段内的 profile 是被提及对象的附加资料，单独由 target 题组判断。",
+        "criteria": {"true": ".message 中当前消息的正文、配文、按钮文字或图片内容中有色情相关内容。", "false": ".message 的当前消息文字和图片中没有色情相关内容。"}
       }
     },
     "profile": {
