@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -95,7 +96,12 @@ func newImageReference(state []byte, assets vision.Assets) (string, error) {
 
 func currentMedia(state json.RawMessage) (map[string]any, []map[string]any, error) {
 	var root map[string]any
-	if err := json.Unmarshal(state, &root); err != nil {
+	if !json.Valid(state) {
+		return nil, nil, fmt.Errorf("invalid model state JSON")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(state))
+	decoder.UseNumber()
+	if err := decoder.Decode(&root); err != nil {
 		return nil, nil, err
 	}
 	var media []map[string]any

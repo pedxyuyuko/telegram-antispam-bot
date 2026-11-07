@@ -241,7 +241,7 @@ func TestVisualFingerprintBindsBytesAndIgnoresRandomAssetReferences(t *testing.T
 }
 
 func TestImageEnrichmentPreservesPresentedContextOrder(t *testing.T) {
-	before := json.RawMessage(`{"sender":{"name":"Member","bio":null},"reply":{"sender":"Quoted","text":"context"},"message":[{"type":"text","text":"caption"},{"type":"media","media":[{"type":"photo"}]}]}`)
+	before := json.RawMessage(`{"counter":9007199254740993,"ratio":1.00,"sender":{"name":"Member","bio":null},"reply":{"sender":"Quoted","text":"context"},"message":[{"type":"text","text":"caption"},{"type":"media","media":[{"type":"photo"}]}]}`)
 	im, err := vision.Normalize(imageFixture(t, color.Black))
 	if err != nil {
 		t.Fatal(err)
