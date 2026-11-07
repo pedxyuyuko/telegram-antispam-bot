@@ -7,8 +7,11 @@ import (
 	"context"
 	"crypto/x509"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	stdimage "image"
+	_ "image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -101,11 +104,14 @@ func TestImageHasNonRootDefaultsAndHTTPSRoots(t *testing.T) {
 		t.Fatal("image example lost the grouped scoring configuration")
 	}
 	questions, err := c.SelectedQuestions(c.Base)
-	if err != nil || len(questions) != 13 {
-		t.Fatalf("image example lost the thirteen-question selection: %v", err)
+	if err != nil || len(questions) != 14 {
+		t.Fatalf("image example lost the fourteen-question selection: %v", err)
 	}
 	if !strings.Contains(questions["content.money"].Instructions, ".message") || !strings.Contains(questions["profile.money"].Instructions, ".sender") || questions["target.invocation"].Type != "noul" {
 		t.Fatal("image example lost the separate message and sender regions")
+	}
+	if !strings.Contains(questions["content.money"].Instructions, "图片内容") || c.Model.ImageTimeoutSeconds != 60 {
+		t.Fatal("image example lost visual question scope or timeout")
 	}
 	id := strings.TrimSpace(string(command(t, engine, "create", name, "-example")))
 	cleanupContainer(t, engine, id)
@@ -134,6 +140,8 @@ func testPersistentRuntime(t *testing.T, useCompose bool) {
 	var phase atomic.Int32
 	var batches atomic.Int32
 	var punishments atomic.Int32
+	var visualRequests atomic.Int32
+	webp, _ := base64.StdEncoding.DecodeString("UklGRigAAABXRUJQVlA4TBsAAAAvP8FFAAdQj0oXpf8BAUnS//9kRP8z/vN/4AEA")
 	resumed := make(chan int64, 8)
 	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
@@ -161,6 +169,13 @@ func testPersistentRuntime(t *testing.T, useCompose bool) {
 			}
 		case strings.HasSuffix(r.URL.Path, "getChat"):
 			fmt.Fprint(w, `{"ok":true,"result":{"id":50,"type":"private","bio":"public profile"}}`)
+		case strings.HasSuffix(r.URL.Path, "getFile"):
+			if r.FormValue("file_id") != "preview" {
+				t.Error("container selected full video instead of thumbnail")
+			}
+			fmt.Fprint(w, `{"ok":true,"result":{"file_id":"preview","file_unique_id":"preview-u","file_path":"stickers/preview.webp"}}`)
+		case strings.HasPrefix(r.URL.Path, "/file/"):
+			w.Write(webp)
 		case strings.HasSuffix(r.URL.Path, "sendMessage"):
 			fmt.Fprint(w, `{"ok":true,"result":{"message_id":100,"date":1,"chat":{"id":-100,"type":"supergroup"}}}`)
 		case strings.HasSuffix(r.URL.Path, "getUpdates"):
@@ -172,7 +187,7 @@ func testPersistentRuntime(t *testing.T, useCompose bool) {
 				}
 			}
 			if batches.Add(1) == 1 {
-				fmt.Fprint(w, `{"ok":true,"result":[{"update_id":501,"message":{"message_id":1,"date":1,"chat":{"id":9,"type":"private"},"from":{"id":9,"first_name":"Owner"},"text":"/as_set base debug true"}},{"update_id":502,"message":{"message_id":2,"date":1,"chat":{"id":-100,"type":"supergroup"},"from":{"id":42,"first_name":"Admin"},"text":"/as_set queue_limit 7"}},{"update_id":503,"message":{"message_id":3,"date":1,"chat":{"id":-100,"type":"supergroup"},"from":{"id":50,"first_name":"User"},"text":"sample advertisement","future_field":"retained"}},{"update_id":504,"chat_member":{"chat":{"id":-100,"type":"supergroup"},"from":{"id":42,"first_name":"Admin"},"date":1,"old_chat_member":{"status":"left","user":{"id":50,"first_name":"User"}},"new_chat_member":{"status":"member","user":{"id":50,"first_name":"User"}}}},{"update_id":505,"message":{"message_id":4,"date":1,"chat":{"id":-100,"type":"supergroup"},"from":{"id":42,"first_name":"Admin"},"new_chat_members":[{"id":50,"first_name":"User"}],"future_field":"join-retained"}}]}`)
+				fmt.Fprint(w, `{"ok":true,"result":[{"update_id":501,"message":{"message_id":1,"date":1,"chat":{"id":9,"type":"private"},"from":{"id":9,"first_name":"Owner"},"text":"/as_set base debug true"}},{"update_id":502,"message":{"message_id":2,"date":1,"chat":{"id":-100,"type":"supergroup"},"from":{"id":42,"first_name":"Admin"},"text":"/as_set queue_limit 7"}},{"update_id":503,"message":{"message_id":3,"date":1,"chat":{"id":-100,"type":"supergroup"},"from":{"id":50,"first_name":"User"},"text":"sample advertisement","future_field":"retained"}},{"update_id":504,"chat_member":{"chat":{"id":-100,"type":"supergroup"},"from":{"id":42,"first_name":"Admin"},"date":1,"old_chat_member":{"status":"left","user":{"id":50,"first_name":"User"}},"new_chat_member":{"status":"member","user":{"id":50,"first_name":"User"}}}},{"update_id":505,"message":{"message_id":4,"date":1,"chat":{"id":-100,"type":"supergroup"},"from":{"id":42,"first_name":"Admin"},"new_chat_members":[{"id":50,"first_name":"User"}],"future_field":"join-retained"}},{"update_id":506,"message":{"message_id":5,"date":1,"chat":{"id":-100,"type":"supergroup"},"from":{"id":50,"first_name":"User"},"sticker":{"file_id":"full-video","file_unique_id":"video-u","is_video":true,"width":512,"height":512,"thumbnail":{"file_id":"preview","file_unique_id":"preview-u","width":320,"height":280}}}}]}`)
 			} else {
 				select {
 				case <-r.Context().Done():
@@ -190,9 +205,30 @@ func testPersistentRuntime(t *testing.T, useCompose bool) {
 		var request struct {
 			Model     string                     `json:"model"`
 			Questions map[string]config.Question `json:"questions"`
+			State     json.RawMessage            `json:"state"`
+			Assets    map[string]struct {
+				Type, Format string
+				Data         string `json:"data_base64"`
+			} `json:"assets"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Error(err)
+		}
+		if len(request.Assets) > 0 {
+			visualRequests.Add(1)
+			if r.Header.Get("TypeSafe-Danger-Zone-Images") != "true" {
+				t.Error("container omitted image compatibility header")
+			}
+			for ref, a := range request.Assets {
+				data, err := base64.StdEncoding.Strict().DecodeString(a.Data)
+				if err != nil {
+					t.Error(err)
+				}
+				cfg, format, err := stdimage.DecodeConfig(bytes.NewReader(data))
+				if err != nil || a.Type != "image" || a.Format != format || cfg.Width < 280 || cfg.Height < 280 || cfg.Width > 1568 || cfg.Height > 1568 || !bytes.Contains(request.State, []byte(ref)) {
+					t.Error("container sent invalid visual asset")
+				}
+			}
 		}
 		answers := map[string]any{}
 		for id := range request.Questions {
@@ -274,7 +310,7 @@ func testPersistentRuntime(t *testing.T, useCompose bool) {
 		}
 		defer db.Close()
 		var n int
-		if db.QueryRow(`SELECT count(*) FROM attempts WHERE error=''`).Scan(&n) != nil || n != 1 {
+		if db.QueryRow(`SELECT count(*) FROM attempts WHERE error=''`).Scan(&n) != nil || n != 2 {
 			return false
 		}
 		if db.QueryRow(`SELECT count(*) FROM join_actions WHERE status='recorded'`).Scan(&n) != nil || n != 1 {
@@ -297,7 +333,7 @@ func testPersistentRuntime(t *testing.T, useCompose bool) {
 	command(t, engine, "start", containerName)
 	select {
 	case offset := <-resumed:
-		if offset != 506 {
+		if offset != 507 {
 			t.Fatalf("lost checkpoint: offset=%d", offset)
 		}
 	case <-time.After(15 * time.Second):
@@ -319,10 +355,16 @@ func testPersistentRuntime(t *testing.T, useCompose bool) {
 	if err := db.QueryRow(`SELECT count(*) FROM attempts`).Scan(&attempts); err != nil {
 		t.Fatal(err)
 	}
-	if updates != 5 || attempts != 1 {
+	if updates != 6 || attempts != 2 {
 		t.Fatalf("restart lost or duplicated evidence: updates=%d attempts=%d", updates, attempts)
 	}
 	var joins int
+	if visualRequests.Load() != 1 {
+		t.Fatalf("visual requests=%d want1 across restart", visualRequests.Load())
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM revision_images WHERE json_extract(lookups,'$[0].status')='available'`).Scan(&joins); err != nil || joins != 1 {
+		t.Fatalf("container lost frozen image audit: %d %v", joins, err)
+	}
 	if err := db.QueryRow(`SELECT count(*) FROM join_service_actions WHERE status='recorded'`).Scan(&joins); err != nil || joins != 1 {
 		t.Fatalf("cleanup observation lost across restart: %d %v", joins, err)
 	}
