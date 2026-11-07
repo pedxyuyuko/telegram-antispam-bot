@@ -11,6 +11,7 @@ import (
 	"telegram-antispam-bot/internal/config"
 	"telegram-antispam-bot/internal/decision"
 	"telegram-antispam-bot/internal/telegram"
+	"telegram-antispam-bot/internal/vision"
 )
 
 const contentCacheSchema = `
@@ -42,6 +43,9 @@ func jobFingerprint(j Job) (telegram.ContentFingerprint, error) {
 	if !m.IsGroup() || m.IsAutomaticForward {
 		return telegram.ContentFingerprint{}, nil
 	}
+	if j.Snapshot.ContextVersion == telegram.VisualContextVersion {
+		return m.VisualContentFingerprint(j.State, j.Assets)
+	}
 	if j.Snapshot.ContextVersion == telegram.SegmentedContextVersion {
 		return m.SegmentedContentFingerprint(j.State)
 	}
@@ -62,6 +66,28 @@ func learnContentTx(ctx context.Context, tx *sql.Tx, j Job, result decision.Resu
 	fingerprint, err := jobFingerprint(j)
 	if err != nil || fingerprint.Hash == "" {
 		return nil
+	}
+	if j.Snapshot.ContextVersion == telegram.VisualContextVersion {
+		var m telegram.Message
+		if err := json.Unmarshal(j.Raw, &m); err != nil {
+			return err
+		}
+		if len(m.ImageSources()) > 0 {
+			var sent struct {
+				State  json.RawMessage `json:"state"`
+				Assets vision.Assets   `json:"assets"`
+			}
+			if json.Unmarshal(result.Request, &sent) != nil {
+				return nil
+			}
+			observed := j
+			observed.State = sent.State
+			observed.Assets = sent.Assets
+			actual, err := jobFingerprint(observed)
+			if err != nil || actual.Hash != fingerprint.Hash || string(actual.Material) != string(fingerprint.Material) {
+				return nil
+			}
+		}
 	}
 	answers, err := json.Marshal(projected.Answers)
 	if err != nil {

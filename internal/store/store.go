@@ -16,6 +16,7 @@ import (
 
 	_ "modernc.org/sqlite"
 	"telegram-antispam-bot/internal/config"
+	"telegram-antispam-bot/internal/vision"
 )
 
 type Store struct {
@@ -50,6 +51,7 @@ type Job struct {
 	Raw        []byte
 	Snapshot   Snapshot
 	State      []byte
+	Assets     vision.Assets
 	Status     string
 }
 type Action struct {
@@ -139,7 +141,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if version > 9 {
+	if version > 10 {
 		db.Close()
 		return nil, fmt.Errorf("unsupported database schema version %d", version)
 	}
@@ -180,6 +182,11 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	if _, err := tx.Exec(joinServiceSchema); err != nil {
+		tx.Rollback()
+		db.Close()
+		return nil, err
+	}
+	if _, err := tx.Exec(imageSchema); err != nil {
 		tx.Rollback()
 		db.Close()
 		return nil, err
