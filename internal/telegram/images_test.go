@@ -239,3 +239,25 @@ func TestVisualFingerprintBindsBytesAndIgnoresRandomAssetReferences(t *testing.T
 		t.Fatal("raw message altered")
 	}
 }
+
+func TestImageEnrichmentPreservesPresentedContextOrder(t *testing.T) {
+	before := json.RawMessage(`{"sender":{"name":"Member","bio":null},"reply":{"sender":"Quoted","text":"context"},"message":[{"type":"text","text":"caption"},{"type":"media","media":[{"type":"photo"}]}]}`)
+	im, err := vision.Normalize(imageFixture(t, color.Black))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, preview := range []bool{false, true} {
+		lookups := []ImageLookup{{Source: ImageSource{Kind: "photo", Preview: preview}, Status: "available", Asset: im.Asset(), SHA256: im.SHA256}}
+		state, assets, err := AttachImages(before, lookups)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Index(state, []byte(`"sender"`)) > bytes.Index(state, []byte(`"message"`)) {
+			t.Fatal("image enrichment moved current content ahead of sender/reply context")
+		}
+		plain, err := WithoutImages(state, assets)
+		if err != nil || !bytes.Equal(before, plain) {
+			t.Fatalf("text fallback changed existing presentation: %s %v", plain, err)
+		}
+	}
+}

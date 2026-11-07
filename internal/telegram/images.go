@@ -148,7 +148,7 @@ func AttachImages(state json.RawMessage, lookups []ImageLookup) (json.RawMessage
 			break
 		}
 	}
-	raw, err := json.Marshal(root)
+	raw, err := marshalStateOrder(state, root)
 	return raw, assets, err
 }
 
@@ -163,10 +163,13 @@ func WithoutImages(state json.RawMessage, assets vision.Assets) (json.RawMessage
 		if ref, ok := item["image"].(string); ok {
 			if _, known := assets[ref]; known {
 				delete(item, "image")
+				if item["image_source"] == "thumbnail" {
+					delete(item, "image_source")
+				}
 			}
 		}
 	}
-	return json.Marshal(root)
+	return marshalStateOrder(state, root)
 }
 
 // VisualContentFingerprint includes the bytes actually supplied to the model,
