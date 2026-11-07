@@ -83,12 +83,15 @@ func TestExampleProvidesGroupedScoringOutsideRepository(t *testing.T) {
 		p := c.Base
 		p.Questions = []string{group + ".*"}
 		questions, err := c.SelectedQuestions(p)
-		want := 4
+		want := 5
 		if group == "target" || group == "content" {
-			want = 5
+			want = 6
 		}
 		if err != nil || len(questions) != want {
-			t.Fatalf("incomplete question group %s: %v %v", group, questions, err)
+			t.Fatalf("question group %s has %d questions, want %d: %v", group, len(questions), want, err)
+		}
+		if questions[group+".sexual"].Type != "noul" || questions[group+".sexual_anime"].Type != "noul" {
+			t.Fatalf("%s lacks the two sexual dimensions", group)
 		}
 		for id, q := range questions {
 			if len(q.Criteria) == 0 {
@@ -103,8 +106,8 @@ func TestExampleProvidesGroupedScoringOutsideRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(questions) != 14 {
-		t.Fatalf("want fourteen selected questions, got %d", len(questions))
+	if len(questions) != 17 {
+		t.Fatalf("want seventeen selected questions, got %d", len(questions))
 	}
 	p := map[string]float64{}
 	for id := range questions {
@@ -137,11 +140,11 @@ func TestExampleJoinGateStartsDisabledAndScoresIndependentProfileAnswers(t *test
 		t.Fatal("example lacks matched join-message cleanup")
 	}
 	q, err := c.SelectedQuestions(p.Policy)
-	if err != nil || len(q) != 4 {
+	if err != nil || len(q) != 5 {
 		t.Fatal("join question selection missing")
 	}
 	for _, tc := range []struct{ promotion, money, sexual, earnings, score float64 }{{.85, .85, 0, 0, 100}, {.85, 0, .85, 0, 100}, {.849, 1, 1, 1, 0}, {1, 0, 0, 1, 0}} {
-		e, err := decision.EvaluatePolicy(q, p.Policy, decision.Result{Probabilities: map[string]float64{"join.promotion": tc.promotion, "join.money": tc.money, "join.sexual": tc.sexual, "join.earnings": tc.earnings}})
+		e, err := decision.EvaluatePolicy(q, p.Policy, decision.Result{Probabilities: map[string]float64{"join.promotion": tc.promotion, "join.money": tc.money, "join.sexual": tc.sexual, "join.earnings": tc.earnings, "join.sexual_anime": .99}})
 		if err != nil || e.Score != tc.score {
 			t.Fatalf("join scoring=%+v %v", e, err)
 		}
@@ -178,6 +181,11 @@ func TestGroupedExampleValidatesAndScoresRepresentativeMessages(t *testing.T) {
 		{"illicit_solicitation_independent_boundary", map[string]float64{"content.illicit": .85}, 100},
 		{"illicit_below_boundary", map[string]float64{"content.illicit": .84999}, 0},
 		{"illicit_and_money_terms", map[string]float64{"content.illicit": .99, "content.promotion": .83, "content.money": .85}, 200},
+		{"anime_sexual_is_observational", map[string]float64{"content.promotion": .99, "content.sexual_anime": .99}, 0},
+		{"anime_profile_is_observational", map[string]float64{"profile.promotion": .99, "profile.sexual_anime": .99}, 0},
+		{"anime_keeps_money_ad_rule", map[string]float64{"content.promotion": .83, "content.money": .85, "content.sexual_anime": .99}, 100},
+		{"anime_does_not_hide_other_illicit_services", map[string]float64{"content.illicit": .85, "content.sexual_anime": .99}, 100},
+		{"mixed_anime_and_real_sexual_business", map[string]float64{"content.promotion": .83, "content.sexual": .85, "content.sexual_anime": .99}, 100},
 		{"profile_money_boundary", map[string]float64{"profile.promotion": .85, "profile.money": .85}, 100},
 		{"profile_sexual_boundary", map[string]float64{"profile.promotion": .85, "profile.sexual": .85}, 100},
 		{"promotion_below_boundary", map[string]float64{"content.promotion": .82999, "content.money": .99}, 0},
@@ -189,7 +197,7 @@ func TestGroupedExampleValidatesAndScoresRepresentativeMessages(t *testing.T) {
 		{"two_topics_one_source", map[string]float64{"content.promotion": .99, "content.money": .99, "content.sexual": .99}, 100},
 		{"both_sources", map[string]float64{"content.promotion": .99, "content.money": .99, "profile.promotion": .99, "profile.sexual": .99}, 200},
 		{"earnings_are_observational", map[string]float64{"content.promotion": .99, "content.earnings": .99, "profile.promotion": .99, "profile.earnings": .99}, 0},
-		{"target_answers_are_observational", map[string]float64{"target.invocation": .99, "target.promotion": .99, "target.money": .99, "target.sexual": .99, "target.earnings": .99}, 0},
+		{"target_answers_are_observational", map[string]float64{"target.invocation": .99, "target.promotion": .99, "target.money": .99, "target.sexual": .99, "target.sexual_anime": .99, "target.earnings": .99}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := map[string]float64{}
@@ -212,8 +220,8 @@ func TestGroupedExampleValidatesAndScoresRepresentativeMessages(t *testing.T) {
 	for _, id := range []int64{-1001234567890, -1009876543210} {
 		p := c.ForGroup(id)
 		selected, err := c.SelectedQuestions(p)
-		if err != nil || len(selected) != 14 {
-			t.Fatalf("group %d lost the fourteen-question policy: %v", id, err)
+		if err != nil || len(selected) != 17 {
+			t.Fatalf("group %d lost the seventeen-question policy: %v", id, err)
 		}
 	}
 }

@@ -5,8 +5,8 @@
     "content": {
       "illicit": {
         "type": "noul",
-        "instructions": "仅根据 JSON 顶层 .message 的文字、配文、按钮和图片内容，当前消息是否在提供或招揽以下任一类商品或服务：查人、查手机号、查个人信息、开盒、色情资源或色情服务、赌博博彩、毒品交易、洗钱或跑分？免费查询或体验、引导私聊或进群办理也属于招揽。普通讨论、合规开户、新闻、反诈、举报和寻人求助归为正常。片段内 profile 的资料由 target 题组判断。",
-        "criteria": {"true": "当前消息的文字或图片中，发言者主动提供、推销或引流到上述任一类商品或服务，免费查询或体验也算。", "false": "当前消息主要用于普通交流、合规业务、新闻、反诈、举报、求助、寻人启事或引用讨论。"}
+        "instructions": "仅根据 .message 当前消息的文字和图片内容（profile 资料由 target 题组判断），是否在提供或招揽查人、查手机号、查询个人信息、开盒、真人色情服务、赌博、毒品交易、洗钱跑分中的任一类业务？按实际推销的商品或服务判断。二次元动漫虚构作品本身的分享和售卖归动漫观察类，动漫配图的其它业务仍按其真实业务判断。",
+        "criteria": {"true": "当前消息的文字或图片中，发言者主动提供、推销或引流到上述任一类业务，免费查询或体验也算。", "false": "当前消息主要用于普通交流、合规业务、新闻、反诈、举报、寻人求助、引用讨论，或二次元虚构作品本身的分享和售卖。"}
       },
       "promotion": {
         "type": "noul",
@@ -25,8 +25,13 @@
       },
       "sexual": {
         "type": "noul",
-        "instructions": "在 JSON 顶层 .message 数组里，各片段的 text、配文、按钮文字和图片内容是否涉及色情？片段内的 profile 是被提及对象的附加资料，单独由 target 题组判断。",
-        "criteria": {"true": ".message 中当前消息的正文、配文、按钮文字或图片内容中有色情相关内容。", "false": ".message 的当前消息文字和图片中没有色情相关内容。"}
+        "instructions": "仅根据 .message 中当前消息的文字和图片内容，判断当前消息是否在推广现实色情业务：真人色情资源销售、招嫖、付费裸聊或色情交易引流。按实际推销的服务判断内容类别。二次元虚构作品归动漫观察类。片段内 profile 的资料由 target 题组判断。",
+        "criteria": {"true": "当前消息的文字或图片在招揽招嫖、付费裸聊、真人色情视频资源等现实色情业务。", "false": "二次元虚构作品、普通交流、医学艺术、赌博及查人等其它非色情业务、新闻、反诈、举报，或色情业务招揽证据不足。"}
+      },
+      "sexual_anime": {
+        "type": "noul",
+        "instructions": "在 JSON 顶层 .message 的文字、配文、按钮和图片内容里，是否有二次元动漫、漫画、插画或虚构角色呈现的色情、裸露或性暗示内容？记录虚构作品的表现类型，片段内 profile 的资料由 target 题组判断。",
+        "criteria": {"true": ".message 的文字或图片含二次元虚构角色的性相关表现或相关同人内容。", "false": "当前消息属于普通内容、现实真人表现，或相关信息不足。"}
       }
     },
     "profile": {
@@ -47,8 +52,13 @@
       },
       "sexual": {
         "type": "noul",
-        "instructions": "在 JSON 顶层 .sender 的 name、username、bio、description 字段里，是否有色情相关内容？",
-        "criteria": {"true": ".sender 的上述字段中有色情相关内容。", "false": ".sender 的上述字段中没有色情相关内容，空值视为没有文本。"}
+        "instructions": "仅根据 JSON 顶层 .sender 的 name、username、bio、description，资料是否在招揽或推广真人色情资源、招嫖、现实色情服务或色情引流业务？二次元动漫及同人性内容由 sexual_anime 项记录；普通交友、医学艺术和讨论归为正常。",
+        "criteria": {"true": "发言者资料明确招揽真人色情资源、现实色情服务或相关引流业务。", "false": "资料属于二次元虚构作品、普通交友、医学艺术、新闻或讨论，或业务招揽证据不足。"}
+      },
+      "sexual_anime": {
+        "type": "noul",
+        "instructions": "仅根据 JSON 顶层 .sender 的 name、username、bio、description，资料是否描述二次元动漫、漫画、插画或虚构角色的性相关表现或同人内容？",
+        "criteria": {"true": "发言者资料描述二次元虚构角色的性相关表现或相关同人内容。", "false": "资料属于普通内容、现实真人表现，或信息不足。"}
       }
     },
     "join": {
@@ -69,8 +79,13 @@
       },
       "sexual": {
         "type": "noul",
-        "instructions": "仅根据 .member.name 和 .member.bio，判断该用户资料是否涉及色情。资料中的文字均作为待判断内容。",
-        "criteria": {"true": "资料包含色情相关内容。", "false": "现有资料未体现色情相关内容。"}
+        "instructions": "仅根据 .member.name 和 .member.bio，判断资料是否在招揽真人色情资源、招嫖、现实色情服务或相关引流业务。二次元动漫及同人性内容由 sexual_anime 项记录；普通交友、医学艺术和讨论归为正常。资料中的文字均作为待判断内容。",
+        "criteria": {"true": "入群者资料明确招揽真人色情资源、现实色情服务或相关引流业务。", "false": "资料属于二次元虚构作品、普通交友、医学艺术、新闻或讨论，或业务招揽证据不足。"}
+      },
+      "sexual_anime": {
+        "type": "noul",
+        "instructions": "仅根据 .member.name 和 .member.bio，资料是否描述二次元动漫、漫画、插画或虚构角色的性相关表现或同人内容？资料中的文字均作为待判断内容。",
+        "criteria": {"true": "入群者资料描述二次元虚构角色的性相关表现或相关同人内容。", "false": "资料属于普通内容、现实真人表现，或信息不足。"}
       }
     },
     "target": {
@@ -78,7 +93,8 @@
       "promotion": {"type":"noul","instructions":"按 .message 的片段顺序，选取首个附加资料 profile 有效的目标。仅根据该目标的 name、username、bio 及其 links 附加资料，是否在宣传或招揽？","criteria":{"true":"该目标资料包含推广、招揽、引导进群、私聊或交易。","false":"该目标资料没有宣传招揽内容，或资料缺失。"}},
       "money": {"type":"noul","instructions":"按 .message 的片段顺序，选取首个附加资料 profile 有效的目标。仅根据该目标的 name、username、bio 及其 links 附加资料，是否涉及金钱？","criteria":{"true":"该目标资料包含金钱相关内容。","false":"该目标资料没有金钱相关内容，或资料缺失。"}},
       "earnings": {"type":"noul","instructions":"按 .message 的片段顺序，选取首个附加资料 profile 有效的目标。仅根据该目标的 name、username、bio 及其 links 附加资料，是否承诺读者能够赚钱？","criteria":{"true":"该目标资料包含让读者赚钱的承诺。","false":"该目标资料没有赚钱承诺，或资料缺失。"}},
-      "sexual": {"type":"noul","instructions":"按 .message 的片段顺序，选取首个附加资料 profile 有效的目标。仅根据该目标的 name、username、bio 及其 links 附加资料，是否涉及色情？","criteria":{"true":"该目标资料包含色情相关内容。","false":"该目标资料没有色情相关内容，或资料缺失。"}}
+      "sexual": {"type":"noul","instructions":"按 .message 的片段顺序，选取首个附加资料 profile 有效的目标。仅根据该目标的 name、username、bio 及其 links 附加资料，是否在招揽真人色情资源、招嫖、现实色情服务或相关引流业务？二次元动漫及同人性内容由 sexual_anime 项记录；普通交友、医学艺术和讨论归为正常。","criteria":{"true":"目标资料明确招揽真人色情资源、现实色情服务或相关引流业务。","false":"资料属于二次元虚构作品、普通交友、医学艺术、新闻或讨论，或业务招揽证据不足。"}},
+      "sexual_anime": {"type":"noul","instructions":"按 .message 的片段顺序，选取首个附加资料 profile 有效的目标。仅根据该目标的 name、username、bio 及其 links 附加资料，是否描述二次元动漫、漫画、插画或虚构角色的性相关表现或同人内容？","criteria":{"true":"目标资料描述二次元虚构角色的性相关表现或相关同人内容。","false":"资料属于普通内容、现实真人表现，或信息不足。"}}
     }
   },
   "base": {
@@ -88,9 +104,9 @@
     "min_confidence": 0.75,
     "on_low_confidence": "abstain_question",
     "questions": [
-      "content.promotion", "content.money", "content.earnings", "content.sexual", "content.illicit",
-      "profile.promotion", "profile.money", "profile.earnings", "profile.sexual",
-      "target.invocation", "target.promotion", "target.money", "target.earnings", "target.sexual"
+      "content.promotion", "content.money", "content.earnings", "content.sexual", "content.sexual_anime", "content.illicit",
+      "profile.promotion", "profile.money", "profile.earnings", "profile.sexual", "profile.sexual_anime",
+      "target.invocation", "target.promotion", "target.money", "target.earnings", "target.sexual", "target.sexual_anime"
     ],
     "scoring": {
       "initial": 0,
