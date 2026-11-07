@@ -121,7 +121,7 @@ func TestLegacyPendingMessageKeepsItsOriginalContextLayout(t *testing.T) {
 	}
 	// A new delivery must carry a format version, so pre-upgrade jobs can retain
 	// their old .msg questions and material layout.
-	if j.Snapshot.ContextVersion != telegram.SegmentedContextVersion {
+	if j.Snapshot.ContextVersion != telegram.VisualContextVersion {
 		t.Fatal("new job lacks context format version")
 	}
 	db, err := sql.Open("sqlite", path)

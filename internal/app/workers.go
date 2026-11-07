@@ -48,6 +48,12 @@ func (a *App) ProcessModel(ctx context.Context, now time.Time) (bool, error) {
 		}
 	}
 	cfg := a.Config.Snapshot()
+	if j.Snapshot.ContextVersion == telegram.VisualContextVersion {
+		j.Assets, err = a.Store.ImageAssets(ctx, j.ID)
+		if err != nil {
+			return false, err
+		}
+	}
 	cached, hit, err := a.Store.ApplyContentCache(ctx, *j, cfg.Model)
 	if err != nil {
 		return false, err
@@ -68,18 +74,34 @@ func (a *App) ProcessModel(ctx context.Context, now time.Time) (bool, error) {
 	var inferenceErr error
 	if !reused {
 		debug(diagnostic, "context.started")
+		var images []telegram.ImageLookup
 		profile := a.Telegram.Profile(ctx, &m, diagnostic)
-		if j.Snapshot.ContextVersion == telegram.SegmentedContextVersion {
+		if j.Snapshot.ContextVersion == telegram.SegmentedContextVersion || j.Snapshot.ContextVersion == telegram.VisualContextVersion {
 			profiles, err := a.referencedProfiles(ctx, *j, &m, profile, diagnostic)
 			if err != nil {
 				return false, err
 			}
 			j.State, inferenceErr = m.SegmentedModelState(profile, profiles)
+			if inferenceErr == nil && j.Snapshot.ContextVersion == telegram.VisualContextVersion {
+				images = a.Telegram.MessageImages(ctx, &m)
+				if len(images) > 0 {
+					j.State, j.Assets, inferenceErr = telegram.AttachImages(j.State, images)
+				}
+				for _, image := range images {
+					debug(diagnostic, "image.lookup", "kind", image.Source.Kind, "preview", image.Source.Preview, "status", image.Status, "width", image.Width, "height", image.Height, "duration_ms", image.DurationMS, "error", image.Error)
+				}
+			}
 		} else {
 			j.State, inferenceErr = m.ModelState(profile)
 		}
 		if inferenceErr == nil {
-			j.State, err = a.Store.FreezeState(ctx, j.ID, j.State)
+			if len(images) > 0 {
+				persist, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				j.State, j.Assets, err = a.Store.FreezeVisualContext(persist, j.ID, j.State, j.Assets, images)
+				cancel()
+			} else {
+				j.State, err = a.Store.FreezeState(ctx, j.ID, j.State)
+			}
 			if err != nil {
 				return false, err
 			}
@@ -90,7 +112,7 @@ func (a *App) ProcessModel(ctx context.Context, now time.Time) (bool, error) {
 	}
 	var result decision.Result
 	if inferenceErr == nil {
-		if !hit && j.Snapshot.ContextVersion == telegram.SegmentedContextVersion {
+		if !hit && (j.Snapshot.ContextVersion == telegram.SegmentedContextVersion || j.Snapshot.ContextVersion == telegram.VisualContextVersion) {
 			cached, hit, err = a.Store.ApplyContentCache(ctx, *j, cfg.Model)
 			if err != nil {
 				return false, err
@@ -110,7 +132,11 @@ func (a *App) ProcessModel(ctx context.Context, now time.Time) (bool, error) {
 		}
 		debug(diagnostic, "context.ready", "reused", reused, "state_bytes", len(j.State))
 		debug(diagnostic, "model.started", "model", cfg.Model.Name, "question_count", len(j.Snapshot.Questions), "questions", questionIDs(j.Snapshot.Questions), "timeout_seconds", cfg.Model.TimeoutSeconds)
-		result, inferenceErr = a.Model.Evaluate(ctx, cfg.Model, j.Snapshot.Questions, j.State)
+		var auditErr error
+		result, inferenceErr, auditErr = a.evaluateMessage(ctx, *j, cfg.Model, diagnostic)
+		if auditErr != nil {
+			return false, auditErr
+		}
 		debug(diagnostic, "model.completed", "success", inferenceErr == nil, "duration_ms", result.Duration.Milliseconds(), "request_bytes", len(result.Request), "response_bytes", len(result.Response))
 	} else {
 		result.Duration = time.Since(started)
