@@ -470,7 +470,7 @@ Telegram 对超级群／频道封禁会同时清理该用户的群内消息；�
 
 ### 图片与贴纸：SORS assets 协议
 
-图片放在顶层 `assets`，当前消息对应的 `photo` 或 `sticker` 项通过 `image` 字段引用。每张图生成独立 UUID，字节使用标准、带补位、无换行的 Base64；`state` 内的 data URI 按普通文字处理。带图请求同时发送 `TypeSafe-Danger-Zone-Images: true`。以下示例省略真实 Base64 数据：
+图片放在顶层 `assets`，当前消息对应的 `photo` 或 `sticker` 项通过 `image` 字段引用。附加图片保留原有对象与数组的遍历顺序，维持发言者资料、引用、当前消息的排列；文字降级恢复原有材料排列和数值表示。每张图生成独立 UUID，字节使用标准、带补位、无换行的 Base64；`state` 内的 data URI 按普通文字处理。带图请求同时发送 `TypeSafe-Danger-Zone-Images: true`。以下示例省略真实 Base64 数据：
 
 ```json
 {
@@ -612,7 +612,7 @@ SQLite 中的主要表：
 | `image.lookup` | 当前图片／贴纸预览的下载状态、标准化尺寸、耗时和安全处理后的错误 |
 | `model.image_fallback` | 带图请求被拒后的独立失败尝试 ID，以及追加文字判断的原因 |
 | `context.started` / `context.ready` / `context.failed` | 判断材料是否复用数据库快照、材料字节数、构建异常 |
-| `model.claimed` / `model.started` / `model.completed` | 排队时间、模型名、题目列表、超时设置、调用耗时、请求及响应字节数 |
+| `model.claimed` / `model.started` / `model.completed` | 排队时间、模型名、题目列表、图片数量、当前请求实际采用的超时、调用耗时、请求及响应字节数 |
 | `model.answers` | 各题概率、服务置信度、有效或弃答状态与原因 |
 | `policy.scored` | 总分、各加减分项的命中／跳过情况、最终条件表达式及三值结果 |
 | `policy.rules` | 处置规则的实际累计次数、要求次数、时间窗口、消息是否首次计数、未达到条件的原因 |
