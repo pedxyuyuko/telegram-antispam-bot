@@ -37,27 +37,27 @@
     "profile": {
       "promotion": {
         "type": "noul",
-        "instructions": "在 JSON 顶层 .sender 的 name、username、bio、description 字段里，是否在宣传或招揽？",
+        "instructions": "发言者资料 .sender（姓名、简介、链接、头像、状态表情及贴纸包、主页频道及其最新帖）是否在宣传或招揽？依据可见文字和图片；Premium、订阅数和装饰徽章本身不代表招揽或官方认证。",
         "criteria": {"true": ".sender 的上述字段中有宣传或招揽内容。", "false": ".sender 的上述字段中没有宣传和招揽，空值视为没有文本。"}
       },
       "money": {
         "type": "noul",
-        "instructions": "在 JSON 顶层 .sender 的 name、username、bio、description 字段里，是否有金钱相关内容？",
+        "instructions": "发言者资料 .sender 的文字和图片（含头像、状态表情及贴纸包、简介链接、主页频道及其最新帖）是否涉及金钱？仅依据实际内容。",
         "criteria": {"true": ".sender 的上述字段中有金钱相关内容。", "false": ".sender 的上述字段中没有金钱相关内容，空值视为没有文本。"}
       },
       "earnings": {
         "type": "noul",
-        "instructions": "在 JSON 顶层 .sender 的 name、username、bio、description 字段里，是否承诺读者能够赚钱？",
+        "instructions": "发言者资料 .sender 的文字和图片（含头像、状态表情及贴纸包、简介链接、主页频道及其最新帖）是否承诺读者能够赚钱？",
         "criteria": {"true": ".sender 的上述字段中有让读者赚钱的承诺。", "false": ".sender 的上述字段中没有赚钱承诺，空值视为没有文本。"}
       },
       "sexual": {
         "type": "noul",
-        "instructions": "仅根据 JSON 顶层 .sender 的 name、username、bio、description，资料是否在招揽或推广真人色情资源、招嫖、现实色情服务或色情引流业务？二次元动漫及同人性内容由 sexual_anime 项记录；普通交友、医学艺术和讨论归为正常。",
+        "instructions": "仅根据发言者资料 .sender 的文字和图片（含头像、状态表情及贴纸包、简介链接、主页频道及其最新帖），资料是否在招揽真人色情资源、招嫖或现实色情服务？须有业务招揽证据；二次元作品归 sexual_anime。",
         "criteria": {"true": "发言者资料明确招揽真人色情资源、现实色情服务或相关引流业务。", "false": "资料属于二次元虚构作品、普通交友、医学艺术、新闻或讨论，或业务招揽证据不足。"}
       },
       "sexual_anime": {
         "type": "noul",
-        "instructions": "仅根据 JSON 顶层 .sender 的 name、username、bio、description，资料是否描述二次元动漫、漫画、插画或虚构角色的性相关表现或同人内容？",
+        "instructions": "仅根据发言者资料 .sender 的文字和图片（含头像、状态表情及贴纸包、简介链接、主页频道及其最新帖），资料是否呈现二次元动漫、漫画、插画或虚构角色的性相关表现或同人内容？",
         "criteria": {"true": "发言者资料描述二次元虚构角色的性相关表现或相关同人内容。", "false": "资料属于普通内容、现实真人表现，或信息不足。"}
       }
     },
