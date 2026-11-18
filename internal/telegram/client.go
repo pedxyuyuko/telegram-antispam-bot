@@ -134,11 +134,14 @@ func (c *Client) Profile(ctx context.Context, m *Message, diagnostic *slog.Logge
 	diagnostic.Debug("profile.started", "event", "profile.started", "sender", id)
 	chat, err := c.Bot.GetChat(ctx, &bot.GetChatParams{ChatID: id})
 	p := Profile{Status: "available", FetchedAt: time.Now().Unix()}
-	if err != nil {
+	if err != nil || chat == nil {
 		p.Status = "unavailable"
 	} else {
 		p.Bio = chat.Bio
 		p.Description = chat.Description
+		if chat.ID == id && chat.Type == models.ChatTypePrivate && m.UserID() != 0 {
+			p.card = &senderCard{photo: chat.Photo, emoji: chat.EmojiStatusCustomEmojiID, expires: chat.EmojiStatusExpirationDate, channel: chat.PersonalChat}
+		}
 	}
 	diagnostic.Debug("profile.completed", "event", "profile.completed", "sender", id, "status", p.Status, "duration_ms", time.Since(started).Milliseconds(), "has_bio", p.Bio != "", "has_description", p.Description != "", "error", c.safe(err))
 	c.mu.Lock()

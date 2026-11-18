@@ -25,6 +25,7 @@ import (
 )
 
 type imageRemote struct {
+	enriched                          atomic.Bool
 	files, downloads, models          atomic.Int32
 	fileFailure, offline              atomic.Bool
 	rejectCode                        atomic.Int32
@@ -115,7 +116,23 @@ func imageApp(t *testing.T) (*App, string, *imageRemote) {
 			json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"status": "member", "user": map[string]any{"id": id, "first_name": "Member"}}})
 		case strings.HasSuffix(req.URL.Path, "/getChat"):
 			id, _ := strconv.ParseInt(req.FormValue("chat_id"), 10, 64)
+			if r.enriched.Load() {
+				if id == -88 {
+					fmt.Fprint(w, `{"ok":true,"result":{"id":-88,"type":"channel","title":"Showcase","description":"Channel description","photo":{"small_file_id":"channel-pic"}}}`)
+					return
+				}
+				fmt.Fprint(w, `{"ok":true,"result":{"id":50,"type":"private","bio":"profile bio","emoji_status_custom_emoji_id":"777","photo":{"small_file_id":"avatar"},"personal_chat":{"id":-88,"type":"channel","title":"Showcase","username":"showcase"}}}`)
+				return
+			}
 			json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"id": id, "type": "private", "bio": "sender biography"}})
+		case strings.HasSuffix(req.URL.Path, "/getUserPersonalChatMessages"):
+			fmt.Fprint(w, `{"ok":true,"result":[{"message_id":7,"date":12345,"chat":{"id":-88,"type":"channel"},"caption":"Latest caption","photo":[{"file_id":"post-photo","width":320,"height":320}]}]}`)
+		case strings.HasSuffix(req.URL.Path, "/getChatMemberCount"):
+			fmt.Fprint(w, `{"ok":true,"result":24}`)
+		case strings.HasSuffix(req.URL.Path, "/getCustomEmojiStickers"):
+			fmt.Fprint(w, `{"ok":true,"result":[{"type":"custom_emoji","custom_emoji_id":"777","emoji":"✅","set_name":"Pack","is_video":true,"file_id":"video","thumbnail":{"file_id":"badge-preview"}},{"type":"custom_emoji","custom_emoji_id":"888","emoji":"🦷","set_name":"Pack","file_id":"tooth"}]}`)
+		case strings.HasSuffix(req.URL.Path, "/getStickerSet"):
+			fmt.Fprint(w, `{"ok":true,"result":{"name":"Pack","title":"Pack Title","stickers":[]}}`)
 		case strings.HasSuffix(req.URL.Path, "/getFile"):
 			r.files.Add(1)
 			r.lastFile.Store(req.FormValue("file_id"))
@@ -151,6 +168,21 @@ func imageApp(t *testing.T) (*App, string, *imageRemote) {
 	return a, path, r
 }
 
+func TestSenderShowcaseAndEmojiReachNativeModel(t *testing.T) {
+	a, path, r := imageApp(t)
+	r.enriched.Store(true)
+	r.rejectCode.Store(422)
+	deliverRawMessage(t, a, 1, `{"message_id":1,"chat":{"id":-100,"type":"supergroup"},"from":{"id":50,"first_name":"Member","is_premium":true},"text":"A🦷","entities":[{"type":"custom_emoji","offset":1,"length":2,"custom_emoji_id":"888"}],"sticker":{"type":"regular","emoji":"♥","set_name":"Pack","file_id":"sticker","file_unique_id":"u"}}`)
+	runModel(t, a, time.Now())
+	const metadata = `json_extract(request,'$.state.sender.personal_channel.latest_post.caption')='Latest caption' AND json_extract(request,'$.state.sender.personal_channel.subscribers')=24 AND json_extract(request,'$.state.sender.emoji_status.set_title')='Pack Title' AND json_extract(request,'$.state.sender.id')=50 AND json_extract(request,'$.state.sender.is_premium')=1 AND request LIKE '%"type":"custom_emoji"%' AND request LIKE '%"custom_emoji_id":"888"%' AND json_extract(request,'$.state.message[1].media[0].set_title')='Pack Title'`
+	if scalar(t, path, `SELECT count(*) FROM attempts WHERE `+metadata+` AND json_type(request,'$.state.sender.emoji_status.image')='text' AND json_extract(request,'$.state.sender.emoji_status.image_source')='thumbnail' AND json_type(request,'$.state.sender.personal_channel.latest_post.image')='text' AND (SELECT count(*) FROM json_each(request,'$.assets'))=6`) != 1 {
+		t.Fatal("missing scoped profile/post/sticker metadata or pixels in visual request")
+	}
+	if scalar(t, path, `SELECT count(*) FROM attempts WHERE `+metadata+` AND json_type(request,'$.assets') IS NULL AND request NOT LIKE '%"image":%'`) != 1 {
+		t.Fatal("fallback must retain metadata and remove all image references")
+	}
+}
+
 func visualMessageRaw(id int, kind string) string {
 	media := `"photo":[{"file_id":"photo-small","file_unique_id":"small","width":320,"height":280},{"file_id":"photo-medium","file_unique_id":"u","width":800,"height":700},{"file_id":"photo-large","file_unique_id":"large","width":1600,"height":1400}]`
 	if kind == "sticker" {
@@ -178,7 +210,7 @@ func TestVisualMessagesSendPhotoAndStickerPixelsWithCurrentScope(t *testing.T) {
 			if scalar(t, path, `SELECT count(*) FROM attempts WHERE json_type(request,'$.assets')='object' AND json_extract(request,'$.state.message[0].text')='same caption' AND json_type(request,'$.state.reply.media[0].image') IS NULL`) != 1 {
 				t.Fatal("asset or image ownership missing in actual request")
 			}
-			if scalar(t, path, `SELECT count(*) FROM revisions WHERE json_extract(snapshot,'$.context_version')=3 AND json_extract(raw,'$.unknown')='preserved'`) != 1 || scalar(t, path, `SELECT count(*) FROM revision_images WHERE json_extract(lookups,'$[0].status')='available'`) != 1 {
+			if scalar(t, path, `SELECT count(*) FROM revisions WHERE json_extract(snapshot,'$.context_version')=4 AND json_extract(raw,'$.unknown')='preserved'`) != 1 || scalar(t, path, `SELECT count(*) FROM revision_images WHERE json_extract(lookups,'$[0].status')='available'`) != 1 {
 				t.Fatal("visual input or download evidence not retained")
 			}
 		})

@@ -13,6 +13,11 @@ import (
 )
 
 const VisualContextVersion = 3
+const RichContextVersion = 4
+
+func HasVisualContext(version int) bool {
+	return version == VisualContextVersion || version == RichContextVersion
+}
 
 type ImageSource struct {
 	Kind         string `json:"kind"`
@@ -161,20 +166,32 @@ func AttachImages(state json.RawMessage, lookups []ImageLookup) (json.RawMessage
 // WithoutImages removes only the generated image-reference fields, retaining
 // all text, biographies, replies, provenance and other media metadata.
 func WithoutImages(state json.RawMessage, assets vision.Assets) (json.RawMessage, error) {
-	root, media, err := currentMedia(state)
+	root, _, err := currentMedia(state)
 	if err != nil {
 		return nil, err
 	}
-	for _, item := range media {
-		if ref, ok := item["image"].(string); ok {
-			if _, known := assets[ref]; known {
-				delete(item, "image")
-				if item["image_source"] == "thumbnail" {
-					delete(item, "image_source")
+	var strip func(any)
+	strip = func(node any) {
+		switch item := node.(type) {
+		case []any:
+			for _, child := range item {
+				strip(child)
+			}
+		case map[string]any:
+			if ref, ok := item["image"].(string); ok {
+				if _, known := assets[ref]; known {
+					delete(item, "image")
+					if item["image_source"] == "thumbnail" {
+						delete(item, "image_source")
+					}
 				}
+			}
+			for _, child := range item {
+				strip(child)
 			}
 		}
 	}
+	strip(root)
 	return marshalStateOrder(state, root)
 }
 
@@ -182,6 +199,42 @@ func WithoutImages(state json.RawMessage, assets vision.Assets) (json.RawMessage
 // with randomized asset references replaced by format and SHA256. Missing image
 // material cannot hit or publish an image judgment, even when captions match.
 func (m *Message) VisualContentFingerprint(state json.RawMessage, assets vision.Assets) (ContentFingerprint, error) {
+	return m.visualFingerprint(state, assets, VisualContextVersion)
+}
+
+// Sender evidence is excluded only for independently proven content hits.
+// Custom emoji depend on additional, potentially missing or changing pixels;
+// leave those messages out of the cross-sender advertisement cache.
+func (m *Message) RichContentFingerprint(state json.RawMessage, assets vision.Assets) (ContentFingerprint, error) {
+	for _, entities := range [][]Entity{m.Entities, m.CaptionEntities} {
+		for _, e := range entities {
+			if e.Type == "custom_emoji" {
+				return ContentFingerprint{}, nil
+			}
+		}
+	}
+	if len(assets) > 0 {
+		root, _, err := currentMedia(state)
+		if err != nil {
+			return ContentFingerprint{}, err
+		}
+		content := make(vision.Assets, len(assets))
+		for k, v := range assets {
+			content[k] = v
+		}
+		sender, _ := root["sender"].(map[string]any)
+		channel, _ := sender["personal_channel"].(map[string]any)
+		for _, v := range []any{sender["avatar"], sender["emoji_status"], channel["avatar"], channel["latest_post"]} {
+			node, _ := v.(map[string]any)
+			ref, _ := node["image"].(string)
+			delete(content, ref)
+		}
+		assets = content
+	}
+	return m.visualFingerprint(state, assets, RichContextVersion)
+}
+
+func (m *Message) visualFingerprint(state json.RawMessage, assets vision.Assets, version int) (ContentFingerprint, error) {
 	sources := m.ImageSources()
 	if len(sources) > 0 {
 		if len(state) == 0 || len(assets) == 0 {
@@ -239,7 +292,7 @@ func (m *Message) VisualContentFingerprint(state json.RawMessage, assets vision.
 	raw, err := json.Marshal(struct {
 		Version  int             `json:"context_version"`
 		Material json.RawMessage `json:"material"`
-	}{VisualContextVersion, base.Material})
+	}{version, base.Material})
 	if err != nil {
 		return ContentFingerprint{}, err
 	}

@@ -48,7 +48,9 @@ func (a *App) ProcessModel(ctx context.Context, now time.Time) (bool, error) {
 		}
 	}
 	cfg := a.Config.Snapshot()
-	if j.Snapshot.ContextVersion == telegram.VisualContextVersion {
+	visual := telegram.HasVisualContext(j.Snapshot.ContextVersion)
+	segmented := visual || j.Snapshot.ContextVersion == telegram.SegmentedContextVersion
+	if visual {
 		j.Assets, err = a.Store.ImageAssets(ctx, j.ID)
 		if err != nil {
 			return false, err
@@ -76,16 +78,20 @@ func (a *App) ProcessModel(ctx context.Context, now time.Time) (bool, error) {
 		debug(diagnostic, "context.started")
 		var images []telegram.ImageLookup
 		profile := a.Telegram.Profile(ctx, &m, diagnostic)
-		if j.Snapshot.ContextVersion == telegram.SegmentedContextVersion || j.Snapshot.ContextVersion == telegram.VisualContextVersion {
+		if segmented {
 			profiles, err := a.referencedProfiles(ctx, *j, &m, profile, diagnostic)
 			if err != nil {
 				return false, err
 			}
 			j.State, inferenceErr = m.SegmentedModelState(profile, profiles)
-			if inferenceErr == nil && j.Snapshot.ContextVersion == telegram.VisualContextVersion {
-				images = a.Telegram.MessageImages(ctx, &m)
-				if len(images) > 0 {
-					j.State, j.Assets, inferenceErr = telegram.AttachImages(j.State, images)
+			if inferenceErr == nil && visual {
+				if j.Snapshot.ContextVersion == telegram.RichContextVersion {
+					j.State, j.Assets, images, inferenceErr = a.Telegram.RichContext(ctx, &m, profile, j.State)
+				} else {
+					images = a.Telegram.MessageImages(ctx, &m)
+					if len(images) > 0 {
+						j.State, j.Assets, inferenceErr = telegram.AttachImages(j.State, images)
+					}
 				}
 				for _, image := range images {
 					debug(diagnostic, "image.lookup", "kind", image.Source.Kind, "preview", image.Source.Preview, "status", image.Status, "width", image.Width, "height", image.Height, "duration_ms", image.DurationMS, "error", image.Error)
@@ -112,7 +118,7 @@ func (a *App) ProcessModel(ctx context.Context, now time.Time) (bool, error) {
 	}
 	var result decision.Result
 	if inferenceErr == nil {
-		if !hit && (j.Snapshot.ContextVersion == telegram.SegmentedContextVersion || j.Snapshot.ContextVersion == telegram.VisualContextVersion) {
+		if !hit && segmented {
 			cached, hit, err = a.Store.ApplyContentCache(ctx, *j, cfg.Model)
 			if err != nil {
 				return false, err

@@ -10,6 +10,7 @@ import (
 type User struct {
 	ID        int64  `json:"id"`
 	IsBot     bool   `json:"is_bot,omitempty"`
+	IsPremium bool   `json:"is_premium,omitempty"`
 	FirstName string `json:"first_name"`
 	LastName  string `json:"last_name,omitempty"`
 	Username  string `json:"username,omitempty"`
@@ -20,11 +21,12 @@ type Chat struct {
 	Title string `json:"title,omitempty"`
 }
 type Entity struct {
-	Type   string `json:"type"`
-	Offset int    `json:"offset"`
-	Length int    `json:"length"`
-	URL    string `json:"url,omitempty"`
-	User   *User  `json:"user,omitempty"`
+	CustomEmojiID string `json:"custom_emoji_id,omitempty"`
+	Type          string `json:"type"`
+	Offset        int    `json:"offset"`
+	Length        int    `json:"length"`
+	URL           string `json:"url,omitempty"`
+	User          *User  `json:"user,omitempty"`
 }
 type Message struct {
 	ID                 int             `json:"message_id"`
@@ -109,6 +111,7 @@ func EntityText(text string, e Entity) string {
 }
 
 type Profile struct {
+	card        *senderCard
 	Status      string `json:"status"`
 	Bio         string `json:"bio,omitempty"`
 	Description string `json:"description,omitempty"`

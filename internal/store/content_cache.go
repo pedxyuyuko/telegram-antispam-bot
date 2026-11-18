@@ -43,6 +43,9 @@ func jobFingerprint(j Job) (telegram.ContentFingerprint, error) {
 	if !m.IsGroup() || m.IsAutomaticForward {
 		return telegram.ContentFingerprint{}, nil
 	}
+	if j.Snapshot.ContextVersion == telegram.RichContextVersion {
+		return m.RichContentFingerprint(j.State, j.Assets)
+	}
 	if j.Snapshot.ContextVersion == telegram.VisualContextVersion {
 		return m.VisualContentFingerprint(j.State, j.Assets)
 	}
@@ -67,7 +70,7 @@ func learnContentTx(ctx context.Context, tx *sql.Tx, j Job, result decision.Resu
 	if err != nil || fingerprint.Hash == "" {
 		return nil
 	}
-	if j.Snapshot.ContextVersion == telegram.VisualContextVersion {
+	if telegram.HasVisualContext(j.Snapshot.ContextVersion) {
 		var m telegram.Message
 		if err := json.Unmarshal(j.Raw, &m); err != nil {
 			return err
