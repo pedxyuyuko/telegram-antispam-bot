@@ -72,10 +72,12 @@ type Client struct {
 	profiles map[int64]cachedProfile
 	files    *http.Client
 	apiBase  string
+	// PublicPageBase is where t.me preview pages are read.
+	PublicPageBase string
 }
 
 func New(cfg config.Telegram, token string, httpClient bot.HttpClient, lastID int64, log *slog.Logger) (*Client, error) {
-	c := &Client{token: token, ttl: time.Duration(cfg.ProfileCacheSeconds) * time.Second, profiles: map[int64]cachedProfile{}, files: imageHTTPClient(httpClient), apiBase: cfg.APIBase}
+	c := &Client{token: token, ttl: time.Duration(cfg.ProfileCacheSeconds) * time.Second, profiles: map[int64]cachedProfile{}, files: imageHTTPClient(httpClient), apiBase: cfg.APIBase, PublicPageBase: "https://t.me"}
 	b, err := bot.New(token, bot.WithSkipGetMe(), bot.WithServerURL(cfg.APIBase),
 		bot.WithHTTPClient(time.Duration(cfg.PollTimeoutSeconds)*time.Second, httpClient),
 		bot.WithAllowedUpdates(bot.AllowedUpdates{"message", "edited_message", "chat_member"}), bot.WithInitialOffset(lastID),

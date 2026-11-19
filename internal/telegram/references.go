@@ -17,6 +17,7 @@ type ReferenceProfile struct {
 	Name     string `json:"name,omitempty"`
 	Bio      string `json:"bio,omitempty"`
 	Kind     string `json:"kind,omitempty"`
+	Audience string `json:"audience,omitempty"`
 }
 
 var referenceUsername = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,31}$`)

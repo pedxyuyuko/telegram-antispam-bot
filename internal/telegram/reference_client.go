@@ -19,6 +19,7 @@ type ReferenceLookup struct {
 	Response   json.RawMessage  `json:"response"`
 	FetchedAt  int64            `json:"fetched_at"`
 	DurationMS int64            `json:"duration_ms"`
+	Page       *PublicPage      `json:"page,omitempty"`
 }
 
 // LookupReference uses only the existing Bot API connection. Known bot IDs may
