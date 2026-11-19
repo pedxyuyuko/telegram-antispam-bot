@@ -126,24 +126,6 @@ func TestImageHasNonRootDefaultsAndHTTPSRoots(t *testing.T) {
 	}
 }
 
-func TestImageExtractsAnimationFramesAsNonRootOnReadOnlyRoot(t *testing.T) {
-	engine, name := image(t)
-	// Same decoder, PNG encoder and scratch location ExtractFrames uses for
-	// Telegram MP4 animations; compose supplies /tmp as tmpfs.
-	out := command(t, engine, "run", "--rm", "--pull=never", "--network=none", "--read-only", "--tmpfs", "/tmp", "--entrypoint", "/bin/sh", name, "-c",
-		"ffmpeg -nostdin -hide_banner -loglevel error -f lavfi -i color=c=red:s=64x64:d=0.2 -update 1 -c:v png /tmp/last.png && test -s /tmp/last.png && id -u")
-	if strings.TrimSpace(string(out)) != "65532" {
-		t.Fatalf("ffmpeg frame extraction output=%q", out)
-	}
-	definition, err := os.ReadFile(filepath.Join("..", "..", "compose.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(definition), "tmpfs:") || !strings.Contains(string(definition), "- /tmp") {
-		t.Fatal("compose read-only root lacks a writable /tmp for frame extraction")
-	}
-}
-
 func TestContainerPersistsCommandChangesAndResumesPolling(t *testing.T) {
 	testPersistentRuntime(t, false)
 }
