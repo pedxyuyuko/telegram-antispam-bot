@@ -107,10 +107,10 @@ func TestImageHasNonRootDefaultsAndHTTPSRoots(t *testing.T) {
 	if err != nil || len(questions) != 17 {
 		t.Fatalf("image example lost the seventeen-question selection: %v", err)
 	}
-	if !strings.Contains(questions["content.money"].Instructions, ".message") || !strings.Contains(questions["profile.money"].Instructions, ".sender") || questions["target.invocation"].Type != "noul" {
+	if !strings.Contains(questions["content.advert"].Instructions, ".message") || !strings.Contains(questions["profile.money"].Instructions, ".sender") || questions["target.invocation"].Type != "noul" {
 		t.Fatal("image example lost the separate message and sender regions")
 	}
-	if !strings.Contains(questions["content.money"].Instructions, "图片内容") || c.Model.ImageTimeoutSeconds != 60 {
+	if !strings.Contains(questions["content.advert"].Instructions, "图片内容") || c.Model.ImageTimeoutSeconds != 60 {
 		t.Fatal("image example lost visual question scope or timeout")
 	}
 	id := strings.TrimSpace(string(command(t, engine, "create", name, "-example")))

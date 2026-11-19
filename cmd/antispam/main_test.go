@@ -90,8 +90,12 @@ func TestExampleProvidesGroupedScoringOutsideRepository(t *testing.T) {
 		if err != nil || len(questions) != want {
 			t.Fatalf("question group %s has %d questions, want %d: %v", group, len(questions), want, err)
 		}
-		if questions[group+".sexual"].Type != "noul" || questions[group+".sexual_anime"].Type != "noul" {
-			t.Fatalf("%s lacks the two sexual dimensions", group)
+		anime := group + ".sexual_anime"
+		if group == "content" {
+			anime = "content.fictional"
+		}
+		if questions[group+".sexual"].Type != "noul" || questions[anime].Type != "noul" {
+			t.Fatalf("%s lacks the sexual and fictional dimensions", group)
 		}
 		for id, q := range questions {
 			if len(q.Criteria) == 0 {
@@ -113,7 +117,7 @@ func TestExampleProvidesGroupedScoringOutsideRepository(t *testing.T) {
 	for id := range questions {
 		p[id] = .01
 	}
-	p["content.promotion"], p["content.money"] = .83, .85
+	p["content.solicit"], p["content.advert"] = .85, .85
 	e, err := decision.EvaluatePolicy(questions, c.Base, decision.Result{Probabilities: p})
 	if err != nil || e.Score != 100 || e.Condition != expression.True {
 		t.Fatalf("generated example lost custom scoring: %+v %v", e, err)
@@ -174,29 +178,27 @@ func TestGroupedExampleValidatesAndScoresRepresentativeMessages(t *testing.T) {
 		probabilities map[string]float64
 		wantScore     float64
 	}{
-		{"money_without_promotion", map[string]float64{"content.money": .99}, 0},
-		{"promotion_without_topic", map[string]float64{"content.promotion": .99}, 0},
-		{"message_money_boundary", map[string]float64{"content.promotion": .83, "content.money": .85}, 100},
-		{"message_sexual_boundary", map[string]float64{"content.promotion": .83, "content.sexual": .85}, 100},
-		{"illicit_solicitation_independent_boundary", map[string]float64{"content.illicit": .85}, 100},
-		{"illicit_below_boundary", map[string]float64{"content.illicit": .84999}, 0},
-		{"illicit_and_money_terms", map[string]float64{"content.illicit": .99, "content.promotion": .83, "content.money": .85}, 200},
-		{"anime_sexual_is_observational", map[string]float64{"content.promotion": .99, "content.sexual_anime": .99}, 0},
+		// Message rule: solicitation plus any one business signal. Replay of
+		// 783 archived messages: 262/262 ad-bot posts, 2/400 normal messages.
+		{"advert_without_solicitation", map[string]float64{"content.advert": .99, "content.illicit": .99, "content.sexual": .99, "content.minor": .99}, 0},
+		{"solicitation_without_business", map[string]float64{"content.solicit": .99}, 0},
+		{"solicited_advert_boundary", map[string]float64{"content.solicit": .85, "content.advert": .85}, 100},
+		{"solicitation_below_boundary", map[string]float64{"content.solicit": .84999, "content.advert": .99, "content.illicit": .99}, 0},
+		{"solicited_illicit_service", map[string]float64{"content.solicit": .85, "content.illicit": .85}, 100},
+		{"solicited_minor_sexualization", map[string]float64{"content.solicit": .85, "content.minor": .85}, 100},
+		{"solicited_real_sexual_content", map[string]float64{"content.solicit": .85, "content.sexual": .85, "content.fictional": .84999}, 100},
+		{"fictional_sexual_content_is_exempt", map[string]float64{"content.solicit": .99, "content.sexual": .99, "content.fictional": .85}, 0},
+		{"fiction_does_not_hide_advert", map[string]float64{"content.solicit": .85, "content.advert": .85, "content.fictional": .99}, 100},
+		{"fiction_does_not_hide_minor_sexualization", map[string]float64{"content.solicit": .85, "content.minor": .85, "content.fictional": .99}, 100},
+		{"illicit_alone_is_not_scored", map[string]float64{"content.illicit": .99}, 0},
+		{"business_signals_below_boundary", map[string]float64{"content.solicit": .99, "content.advert": .84999, "content.illicit": .84999, "content.minor": .84999, "content.sexual": .84999}, 0},
+		{"one_message_rule_per_message", map[string]float64{"content.solicit": .99, "content.advert": .99, "content.illicit": .99, "content.minor": .99, "content.sexual": .99}, 100},
 		{"anime_profile_is_observational", map[string]float64{"profile.promotion": .99, "profile.sexual_anime": .99}, 0},
-		{"anime_keeps_money_ad_rule", map[string]float64{"content.promotion": .83, "content.money": .85, "content.sexual_anime": .99}, 100},
-		{"anime_does_not_hide_other_illicit_services", map[string]float64{"content.illicit": .85, "content.sexual_anime": .99}, 100},
-		{"mixed_anime_and_real_sexual_business", map[string]float64{"content.promotion": .83, "content.sexual": .85, "content.sexual_anime": .99}, 100},
 		{"profile_money_boundary", map[string]float64{"profile.promotion": .85, "profile.money": .85}, 100},
 		{"profile_sexual_boundary", map[string]float64{"profile.promotion": .85, "profile.sexual": .85}, 100},
-		{"promotion_below_boundary", map[string]float64{"content.promotion": .82999, "content.money": .99}, 0},
-		{"normal_discussion_6810", map[string]float64{"content.promotion": .81914, "content.money": .98833}, 0},
-		{"wealth_ad_6819", map[string]float64{"content.promotion": .845790684223175, "content.money": .8896596431732178}, 100},
-		{"wealth_ad_6823", map[string]float64{"content.promotion": .8409253358840942, "content.money": .8899038434028625}, 100},
-		{"topic_below_boundary", map[string]float64{"content.promotion": .99, "content.money": .84999, "content.sexual": .84999}, 0},
-		{"sources_are_independent", map[string]float64{"content.promotion": .99, "profile.money": .99}, 0},
-		{"two_topics_one_source", map[string]float64{"content.promotion": .99, "content.money": .99, "content.sexual": .99}, 100},
-		{"both_sources", map[string]float64{"content.promotion": .99, "content.money": .99, "profile.promotion": .99, "profile.sexual": .99}, 200},
-		{"earnings_are_observational", map[string]float64{"content.promotion": .99, "content.earnings": .99, "profile.promotion": .99, "profile.earnings": .99}, 0},
+		{"sources_are_independent", map[string]float64{"content.solicit": .99, "profile.money": .99}, 0},
+		{"both_sources", map[string]float64{"content.solicit": .99, "content.advert": .99, "profile.promotion": .99, "profile.sexual": .99}, 200},
+		{"earnings_are_observational", map[string]float64{"content.solicit": .99, "profile.promotion": .99, "profile.earnings": .99}, 0},
 		{"target_answers_are_observational", map[string]float64{"target.invocation": .99, "target.promotion": .99, "target.money": .99, "target.sexual": .99, "target.sexual_anime": .99, "target.earnings": .99}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
