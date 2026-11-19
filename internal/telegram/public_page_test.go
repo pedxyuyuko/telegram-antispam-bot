@@ -72,8 +72,11 @@ func TestPublicPageFetchesUsernameAndInvitePaths(t *testing.T) {
 			t.Fatal(value)
 		}
 		page := c.PublicPage(context.Background(), ref)
-		if !page.Found || page.HTTPStatus != 200 || page.Title == "" {
+		if !page.Found || page.HTTPStatus != 200 || page.Title == "" || page.FetchedAt == 0 || page.Cached {
 			t.Fatalf("%s: %+v", value, page)
+		}
+		if u, err := c.PublicPageURL(ref); err != nil || u != page.URL {
+			t.Fatalf("cache key %q differs from fetched URL %q: %v", u, page.URL, err)
 		}
 	}
 	if strings.Join(paths, " ") != "/somebot /+qSxg1c_Apeo1NGZl /joinchat/AbCd_ef" {
@@ -143,5 +146,14 @@ func TestPublicPageCompletesOnlyMissingProfileMaterial(t *testing.T) {
 	raw, _ := json.Marshal(l)
 	if !strings.Contains(string(raw), `"page"`) {
 		t.Fatal("page audit not archived")
+	}
+}
+
+func TestPublicPageURLRejectsReferencesWithoutPages(t *testing.T) {
+	c := pageClient(t, func(w http.ResponseWriter, r *http.Request) { t.Error("fetched") })
+	for _, ref := range []Reference{{Key: "invite:https://t.me/+bad/../x", URL: "https://t.me/+bad/../x"}, {Key: "username:", Username: ""}} {
+		if u, err := c.PublicPageURL(ref); err == nil {
+			t.Fatalf("accepted %+v as %s", ref, u)
+		}
 	}
 }

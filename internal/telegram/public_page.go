@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -28,6 +29,10 @@ type PublicPage struct {
 	Audience    string `json:"audience,omitempty"`
 	Error       string `json:"error,omitempty"`
 	DurationMS  int64  `json:"duration_ms"`
+	FetchedAt   int64  `json:"fetched_at"`
+	// Cached marks a page reused from an earlier lookup; FetchedAt stays the
+	// time it was actually read.
+	Cached bool `json:"cached,omitempty"`
 }
 
 var (
@@ -40,20 +45,11 @@ var (
 // for unknown names.
 func (c *Client) PublicPage(ctx context.Context, ref Reference) (page PublicPage) {
 	start := time.Now()
+	page.FetchedAt = start.UnixMilli()
 	defer func() { page.DurationMS = time.Since(start).Milliseconds() }()
-	base := strings.TrimRight(c.PublicPageBase, "/")
-	switch {
-	case ref.Username != "" && referenceUsername.MatchString(ref.Username):
-		page.URL = base + "/" + strings.ToLower(ref.Username)
-	case strings.HasPrefix(ref.Key, "invite:"):
-		u, err := url.Parse(ref.URL)
-		if err != nil || !invitePath.MatchString(u.EscapedPath()) {
-			page.Error = "unsupported invite link"
-			return page
-		}
-		page.URL = base + u.EscapedPath()
-	default:
-		page.Error = "reference has no public page"
+	var err error
+	if page.URL, err = c.PublicPageURL(ref); err != nil {
+		page.Error = err.Error()
 		return page
 	}
 	if c.files == nil {
@@ -98,11 +94,28 @@ func (c *Client) PublicPage(ctx context.Context, ref Reference) (page PublicPage
 		page.Error = err.Error()
 		return page
 	}
-	parsed.URL, parsed.HTTPStatus = page.URL, page.HTTPStatus
+	parsed.URL, parsed.HTTPStatus, parsed.FetchedAt = page.URL, page.HTTPStatus, page.FetchedAt
 	if !parsed.Found {
 		parsed.Error = "public page has no profile"
 	}
 	return parsed
+}
+
+// PublicPageURL is the t.me page of a username or invite link; it also keys
+// the page cache.
+func (c *Client) PublicPageURL(ref Reference) (string, error) {
+	base := strings.TrimRight(c.PublicPageBase, "/")
+	switch {
+	case ref.Username != "" && referenceUsername.MatchString(ref.Username):
+		return base + "/" + strings.ToLower(ref.Username), nil
+	case strings.HasPrefix(ref.Key, "invite:"):
+		u, err := url.Parse(ref.URL)
+		if err != nil || !invitePath.MatchString(u.EscapedPath()) {
+			return "", errors.New("unsupported invite link")
+		}
+		return base + u.EscapedPath(), nil
+	}
+	return "", errors.New("reference has no public page")
 }
 
 func hasClass(n *html.Node, class string) bool {
