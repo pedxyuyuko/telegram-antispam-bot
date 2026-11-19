@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS reference_profiles(
  status TEXT NOT NULL CHECK(status IN ('available','unavailable','unsupported','limit')),
  fetched_at INTEGER NOT NULL,payload TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS reference_profile_cache ON reference_profiles(bot_id,reference_key,fetched_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS reference_profile_pages ON reference_profiles(json_extract(payload,'$.page.url'),json_extract(payload,'$.page.fetched_at') DESC) WHERE json_extract(payload,'$.page.found')=1;
 CREATE TABLE IF NOT EXISTS revision_reference_profiles(
  revision_id INTEGER NOT NULL REFERENCES revisions(id),reference_key TEXT NOT NULL,
  lookup_id INTEGER NOT NULL REFERENCES reference_profiles(id),depth INTEGER NOT NULL,
@@ -116,4 +117,33 @@ func (s *Store) ResolveReference(ctx context.Context, revision, botID int64, ref
 		return StoredReference{}, err
 	}
 	return *chosen, nil
+}
+
+// FreshPublicPage returns the newest found t.me page for url read within
+// maxAge. Pages live inside archived lookups, so reuse needs no extra table
+// and leaves the schema version unchanged.
+func (s *Store) FreshPublicPage(ctx context.Context, url string, maxAge time.Duration) (*telegram.PublicPage, error) {
+	if maxAge <= 0 {
+		return nil, nil
+	}
+	var raw []byte
+	err := s.db.QueryRowContext(ctx, `SELECT json_extract(payload,'$.page') FROM reference_profiles
+		WHERE json_extract(payload,'$.page.url')=? AND json_extract(payload,'$.page.found')=1
+		ORDER BY json_extract(payload,'$.page.fetched_at') DESC LIMIT 1`, url).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var page telegram.PublicPage
+	if err := json.Unmarshal(raw, &page); err != nil {
+		return nil, err
+	}
+	age := time.Since(time.UnixMilli(page.FetchedAt))
+	if age < 0 || age > maxAge {
+		return nil, nil
+	}
+	page.Cached, page.DurationMS = true, 0
+	return &page, nil
 }

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"telegram-antispam-bot/internal/config"
 	"telegram-antispam-bot/internal/telegram"
 )
 
@@ -256,7 +257,7 @@ func TestReferenceBudgetExpiringDuringQueryStaysLocal(t *testing.T) {
 
 // pageGateway serves Bot API getChat for a bot without description plus t.me
 // preview pages, and switches the global public-page option.
-func pageGateway(t *testing.T, a *App, path string, enabled bool) (api, pages *atomic.Int32) {
+func pageGateway(t *testing.T, a *App, path string, settings config.PublicPages) (api, pages *atomic.Int32) {
 	t.Helper()
 	api, pages = &atomic.Int32{}, &atomic.Int32{}
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -269,7 +270,7 @@ func pageGateway(t *testing.T, a *App, path string, enabled bool) (api, pages *a
 			case "@dsgdsyudsuibot":
 				api.Add(1)
 				fmt.Fprint(w, `{"ok":true,"result":{"id":8970955751,"type":"private","username":"dsgdsyudsuibot","first_name":"Group Help"}}`)
-			case "@unseenuser":
+			case "@unseenuser", "@ghostname":
 				api.Add(1)
 				fmt.Fprint(w, `{"ok":false,"error_code":400,"description":"Bad Request: chat not found"}`)
 			default:
@@ -282,7 +283,7 @@ func pageGateway(t *testing.T, a *App, path string, enabled bool) (api, pages *a
 	t.Cleanup(s.Close)
 	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pages.Add(1)
-		fixture := map[string]string{"/dsgdsyudsuibot": "bot", "/unseenuser": "user", "/+qSxg1c_Apeo1NGZl": "invite"}[r.URL.EscapedPath()]
+		fixture := map[string]string{"/dsgdsyudsuibot": "bot", "/unseenuser": "user", "/+qSxg1c_Apeo1NGZl": "invite", "/ghostname": "missing"}[r.URL.EscapedPath()]
 		if fixture == "" {
 			t.Errorf("unexpected page %s", r.URL.Path)
 			return
@@ -296,7 +297,7 @@ func pageGateway(t *testing.T, a *App, path string, enabled bool) (api, pages *a
 	}))
 	t.Cleanup(page.Close)
 	c := a.Config.Snapshot()
-	c.PublicPages.Enabled = enabled
+	c.PublicPages = settings
 	saveScoringConfig(t, a, path, c)
 	cfg := c.Telegram
 	cfg.APIBase = s.URL
@@ -313,7 +314,7 @@ func pageGateway(t *testing.T, a *App, path string, enabled bool) (api, pages *a
 func TestPublicPagesCompleteBotDescriptionsUnseenUsersAndInvites(t *testing.T) {
 	a, path := appFixture(t, "member")
 	modelFixture(t, a, path, nil)
-	api, pages := pageGateway(t, a, path, true)
+	api, pages := pageGateway(t, a, path, config.PublicPages{Enabled: true})
 	deliver(t, a, 1, message(50, "@dsgdsyudsuibot campaign_001 @unseenuser https://t.me/+qSxg1c_Apeo1NGZl"))
 	runModel(t, a, time.Now())
 	if api.Load() != 2 || pages.Load() != 3 {
@@ -337,7 +338,7 @@ func TestPublicPagesCompleteBotDescriptionsUnseenUsersAndInvites(t *testing.T) {
 func TestPublicPagesStayOffUnlessEnabled(t *testing.T) {
 	a, path := appFixture(t, "member")
 	modelFixture(t, a, path, nil)
-	_, pages := pageGateway(t, a, path, false)
+	_, pages := pageGateway(t, a, path, config.PublicPages{})
 	deliver(t, a, 1, message(50, "@dsgdsyudsuibot @unseenuser https://t.me/+qSxg1c_Apeo1NGZl"))
 	runModel(t, a, time.Now())
 	if pages.Load() != 0 || scalar(t, path, `SELECT count(*) FROM reference_profiles WHERE status='available'`) != 1 {
@@ -347,7 +348,7 @@ func TestPublicPagesStayOffUnlessEnabled(t *testing.T) {
 
 func TestPublicPageRequestsShareTheReferenceBudget(t *testing.T) {
 	a, path := appFixture(t, "member")
-	_, pages := pageGateway(t, a, path, true)
+	_, pages := pageGateway(t, a, path, config.PublicPages{Enabled: true})
 	ref, _ := telegram.ParseReference("https://t.me/+qSxg1c_Apeo1NGZl")
 	requests := 8
 	result := a.lookupReferenceWithinBudget(context.Background(), ref, 0, &requests)
@@ -357,5 +358,84 @@ func TestPublicPageRequestsShareTheReferenceBudget(t *testing.T) {
 	requests = 0
 	if result = a.lookupReferenceWithinBudget(context.Background(), ref, 0, &requests); result.Status != "available" || requests != 1 {
 		t.Fatalf("invite page not counted: %+v requests=%d", result, requests)
+	}
+}
+
+// expireLookups ages archived lookups past the Bot API profile cache; with
+// pageAge the archived t.me pages age by the same amount.
+func expireLookups(t *testing.T, a *App, path string, pageAge time.Duration) {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	shift := (2 * time.Hour).Milliseconds()
+	if _, err := db.Exec(`UPDATE reference_profiles SET fetched_at=fetched_at-?, payload=json_set(payload,'$.fetched_at',json_extract(payload,'$.fetched_at')-?)`, shift, shift); err != nil {
+		t.Fatal(err)
+	}
+	if pageAge > 0 {
+		if _, err := db.Exec(`UPDATE reference_profiles SET payload=json_set(payload,'$.page.fetched_at',json_extract(payload,'$.page.fetched_at')-?) WHERE json_type(payload,'$.page') IS NOT NULL`, pageAge.Milliseconds()); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestFoundPublicPagesOutliveTheProfileCache(t *testing.T) {
+	seconds := func(n int) *int { return &n }
+	for _, tc := range []struct {
+		name      string
+		settings  config.PublicPages
+		pageAge   time.Duration
+		wantPages int32
+	}{
+		// Each message reads three pages: the bot, the +invite group in its
+		// description, and the missing name. Only the missing one repeats.
+		{"reused within one day by default", config.PublicPages{Enabled: true}, 0, 4},
+		{"refetched after its window", config.PublicPages{Enabled: true, CacheSeconds: seconds(3600)}, 2 * time.Hour, 6},
+		{"zero disables reuse", config.PublicPages{Enabled: true, CacheSeconds: seconds(0)}, 0, 6},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, path := appFixture(t, "member")
+			modelFixture(t, a, path, nil)
+			api, pages := pageGateway(t, a, path, tc.settings)
+			for i := 1; i <= 2; i++ {
+				if i == 2 {
+					expireLookups(t, a, path, tc.pageAge)
+				}
+				m := message(50, "@dsgdsyudsuibot @ghostname")
+				m.ID = i
+				deliver(t, a, int64(i), m)
+				runModel(t, a, time.Now())
+			}
+			// Bot API is asked again each time; only the found page is reused.
+			if api.Load() != 4 || pages.Load() != tc.wantPages {
+				t.Fatalf("api=%d pages=%d want pages %d", api.Load(), pages.Load(), tc.wantPages)
+			}
+			if scalar(t, path, `SELECT count(*) FROM revisions WHERE json_extract(state,'$.message[0].profile.bio') LIKE '发财新項木%'`) != 2 {
+				t.Fatal("cached page lost its profile material")
+			}
+			cached := 0
+			if tc.wantPages == 4 {
+				cached = 2
+			}
+			if scalar(t, path, `SELECT count(*) FROM reference_profiles WHERE json_extract(payload,'$.page.cached')=1`) != cached {
+				t.Fatal("page reuse not marked in the lookup audit")
+			}
+		})
+	}
+}
+
+func TestCachedPublicPageDoesNotSpendTheReferenceBudget(t *testing.T) {
+	a, path := appFixture(t, "member")
+	modelFixture(t, a, path, nil)
+	_, pages := pageGateway(t, a, path, config.PublicPages{Enabled: true})
+	deliver(t, a, 1, message(50, "https://t.me/+qSxg1c_Apeo1NGZl"))
+	runModel(t, a, time.Now())
+	ref, _ := telegram.ParseReference("https://t.me/+qSxg1c_Apeo1NGZl")
+	requests := 8
+	got := a.lookupReferenceWithinBudget(context.Background(), ref, 0, &requests)
+	if got.Status != "available" || got.Page == nil || !got.Page.Cached || pages.Load() != 1 || requests != 8 {
+		t.Fatalf("cached page blocked by spent budget: %+v pages=%d requests=%d", got, pages.Load(), requests)
 	}
 }

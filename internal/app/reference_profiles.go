@@ -87,8 +87,16 @@ func (a *App) lookupReferenceWithinBudget(budget context.Context, ref telegram.R
 	if result.Status == "unavailable" && budget.Err() != nil {
 		return exhausted(result)
 	}
-	if !a.Config.Snapshot().PublicPages.Enabled || !needsPublicPage(result) {
+	settings := a.Config.Snapshot().PublicPages
+	if !settings.Enabled || !needsPublicPage(result) {
 		return result
+	}
+	// A found page read within the cache window is reused without a request.
+	if u, err := a.Telegram.PublicPageURL(ref); err == nil {
+		if page, err := a.Store.FreshPublicPage(budget, u, settings.Cache()); err == nil && page != nil {
+			result.MergePublicPage(*page)
+			return result
+		}
 	}
 	// The t.me page shares the per-message request count and time budget.
 	if !spend() {
