@@ -554,7 +554,13 @@ Telegram 把 GIF 动图以 `animation` 下发，文件通常已转成无声 MP4�
 
 资料来源使用现有 Bot API `getChat`：公开群／频道按 `@用户名` 查询，已观察到的 bot 可使用归档数字 ID。支持正文、配文、隐藏链接、按钮及发言者简介中的 Telegram 用户名／公开链接。直接链接读取目标群／频道资料；提及对象的 bio 中再补一层 Telegram 链接资料。资料保持来源归属。
 
-Bot API 读不到三类资料：其他 bot 的简介（bot 主人设置的 short description）、bot 从未接触过的用户、`t.me/+…`／`t.me/joinchat/…` 邀请链接指向的群。顶层 `"public_pages": true` 打开后，这三种情况会再读一次对应的 t.me 公开页，取页面上的显示名、简介、类型（bot、个人、群、频道）以及群／频道的成员或订阅数（`audience`）。Bot API 已有显示名时，页面名称必须一致才会补用其简介；Telegram 给空简介填的 "You can contact @… right away." 视为没有简介，不存在的用户名记为查不到。页面请求限时 5 秒、最多 512 KiB、不跟随跳转，计入同一条消息的 8 次查询和 10 秒预算；查询记录保存页面地址、HTTP 状态和取到的字段，不保存整页 HTML。开关默认关闭，修改后 `/as_reload` 即生效。
+Bot API 读不到三类资料：其他 bot 的简介（bot 主人设置的 short description）、bot 从未接触过的用户、`t.me/+…`／`t.me/joinchat/…` 邀请链接指向的群。顶层 `"public_pages": {"enabled": true}` 打开后，这三种情况会再读一次对应的 t.me 公开页，取页面上的显示名、简介、类型（bot、个人、群、频道）以及群／频道的成员或订阅数（`audience`）。Bot API 已有显示名时，页面名称必须一致才会补用其简介；Telegram 给空简介填的 "You can contact @… right away." 视为没有简介，不存在的用户名记为查不到。页面请求限时 5 秒、最多 512 KiB、不跟随跳转，计入同一条消息的 8 次查询和 10 秒预算；查询记录保存页面地址、HTTP 状态、抓取时间和取到的字段，不保存整页 HTML。开关默认关闭，修改后 `/as_reload` 即生效。
+
+找到资料的页面单独缓存 `public_pages.cache_seconds` 秒，默认 86400（一天），允许 0～604800，0 表示每次重新读取。这个窗口独立于 `telegram.profile_cache_seconds`：Bot API 部分按原有时长刷新，页面在窗口内直接复用，记录中标为 `cached` 并保留原抓取时间，不占用单条消息的查询次数。不存在的用户名和读取失败不进入页面缓存。缓存直接取自已归档的查询记录，数据库版本不变。
+
+```json
+"public_pages": {"enabled": true, "cache_seconds": 86400}
+```
 
 开关关闭时，邀请链接记为 `unsupported`；查询失败记为 `unavailable`，每次结果保留查询参数、SDK 解析后的返回值、错误、时间和所关联消息版本。目标缺失时片段内 `profile` 为 `null`，原消息继续正常模型判断。目标资料提供判断背景，实际处罚身份继续来自 Telegram 原始消息与可信调用关联。
 
