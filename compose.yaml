@@ -16,6 +16,9 @@ services:
       # Shared SELinux labeling also permits one-off validation containers.
       - ./runtime:/runtime:z
     read_only: true
+    # Animation frame extraction stages the downloaded file for ffmpeg here.
+    tmpfs:
+      - /tmp:size=64m,mode=1777
     cap_drop:
       - ALL
     security_opt:
