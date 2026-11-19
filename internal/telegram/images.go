@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"bytes"
+	"cmp"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -22,6 +23,7 @@ func HasVisualContext(version int) bool {
 type ImageSource struct {
 	Kind         string `json:"kind"`
 	Preview      bool   `json:"preview,omitempty"`
+	Frames       bool   `json:"frames,omitempty"`
 	FileID       string `json:"file_id"`
 	FileUniqueID string `json:"file_unique_id,omitempty"`
 	Width        int    `json:"width,omitempty"`
@@ -77,6 +79,35 @@ func (m *Message) ImageSources() []ImageSource {
 				source = *thumb
 				source.Kind = "sticker"
 				source.Preview = true
+			}
+		}
+		sources = append(sources, source)
+	}
+	// Telegram mirrors every animation into "document"; only a standalone
+	// GIF document is a separate frame source.
+	for _, kind := range []string{"animation", "document"} {
+		raw, ok := fields[kind]
+		if !ok || kind == "document" && fields["animation"] != nil {
+			continue
+		}
+		var a struct {
+			ImageSource
+			MIME      string       `json:"mime_type"`
+			Thumbnail *ImageSource `json:"thumbnail"`
+			Thumb     *ImageSource `json:"thumb"`
+		}
+		_ = json.Unmarshal(raw, &a)
+		if kind == "document" && a.MIME != "image/gif" {
+			continue
+		}
+		source := a.ImageSource
+		source.Kind, source.Preview, source.Frames = kind, false, true
+		if source.FileSize > vision.MaxImageBytes {
+			// Too large to fetch whole: fall back to Telegram's still preview.
+			source = ImageSource{Kind: kind, Preview: true}
+			if thumb := cmp.Or(a.Thumbnail, a.Thumb); thumb != nil {
+				source = *thumb
+				source.Kind, source.Preview, source.Frames = kind, true, false
 			}
 		}
 		sources = append(sources, source)
@@ -146,21 +177,48 @@ func AttachImages(state json.RawMessage, lookups []ImageLookup) (json.RawMessage
 			if _, exists := item["image"]; exists {
 				continue
 			}
-			ref, err := newImageReference(state, assets)
-			if err != nil {
+			if _, exists := item["frames"]; exists {
+				continue
+			}
+			if err := attachLookup(state, assets, item, lookup); err != nil {
 				return nil, nil, err
 			}
-			assets[ref] = lookup.Asset
-			item["image"] = ref
-			if lookup.Source.Preview {
-				item["image_source"] = "thumbnail"
-			}
-			lookup.Reference = ref
 			break
 		}
 	}
 	raw, err := marshalStateOrder(state, root)
 	return raw, assets, err
+}
+
+// attachLookup gives the owner either one image reference or, for animations,
+// an ordered frames list of {position, image} references.
+func attachLookup(material []byte, assets vision.Assets, owner map[string]any, lookup *ImageLookup) error {
+	if len(lookup.Frames) > 0 {
+		frames := make([]any, 0, len(lookup.Frames))
+		for i := range lookup.Frames {
+			f := &lookup.Frames[i]
+			ref, err := newImageReference(material, assets)
+			if err != nil {
+				return err
+			}
+			assets[ref] = f.Asset
+			f.Reference = ref
+			frames = append(frames, map[string]any{"position": f.Position, "image": ref})
+		}
+		owner["frames"] = frames
+		return nil
+	}
+	ref, err := newImageReference(material, assets)
+	if err != nil {
+		return err
+	}
+	assets[ref] = lookup.Asset
+	owner["image"] = ref
+	if lookup.Source.Preview {
+		owner["image_source"] = "thumbnail"
+	}
+	lookup.Reference = ref
+	return nil
 }
 
 // WithoutImages removes only the generated image-reference fields, retaining
@@ -178,6 +236,19 @@ func WithoutImages(state json.RawMessage, assets vision.Assets) (json.RawMessage
 				strip(child)
 			}
 		case map[string]any:
+			if frames, ok := item["frames"].([]any); ok && len(frames) > 0 {
+				generated := true
+				for _, f := range frames {
+					frame, _ := f.(map[string]any)
+					ref, _ := frame["image"].(string)
+					if _, known := assets[ref]; !known {
+						generated = false
+					}
+				}
+				if generated {
+					delete(item, "frames")
+				}
+			}
 			if ref, ok := item["image"].(string); ok {
 				if _, known := assets[ref]; known {
 					delete(item, "image")
@@ -249,26 +320,46 @@ func (m *Message) visualFingerprint(state json.RawMessage, assets vision.Assets,
 			needed[s.Kind]++
 		}
 		used := map[string]bool{}
+		// digest replaces a random reference with the bytes it stands for.
+		digest := func(ref string) (map[string]any, bool) {
+			asset, ok := assets[ref]
+			if !ok || used[ref] || asset.Type != "image" || (asset.Format != "png" && asset.Format != "jpeg" && asset.Format != "jpg") {
+				return nil, false
+			}
+			if len(asset.DataBase64) > base64.StdEncoding.EncodedLen(vision.MaxImageBytes) {
+				return nil, false
+			}
+			data, err := base64.StdEncoding.Strict().DecodeString(asset.DataBase64)
+			if err != nil || len(data) == 0 {
+				return nil, false
+			}
+			used[ref] = true
+			return map[string]any{"format": asset.Format, "sha256": fmt.Sprintf("%x", sha256.Sum256(data))}, true
+		}
 		for _, item := range media {
 			kind, _ := item["type"].(string)
 			if needed[kind] == 0 {
 				continue
 			}
-			ref, _ := item["image"].(string)
-			asset, ok := assets[ref]
-			if !ok || asset.Type != "image" || (asset.Format != "png" && asset.Format != "jpeg" && asset.Format != "jpg") {
-				return ContentFingerprint{}, nil
+			if frames, ok := item["frames"].([]any); ok && len(frames) > 0 {
+				for _, f := range frames {
+					frame, _ := f.(map[string]any)
+					ref, _ := frame["image"].(string)
+					d, ok := digest(ref)
+					if !ok {
+						return ContentFingerprint{}, nil
+					}
+					frame["image"] = d
+				}
+			} else {
+				ref, _ := item["image"].(string)
+				d, ok := digest(ref)
+				if !ok {
+					return ContentFingerprint{}, nil
+				}
+				item["image"] = d
 			}
-			if len(asset.DataBase64) > base64.StdEncoding.EncodedLen(vision.MaxImageBytes) {
-				return ContentFingerprint{}, nil
-			}
-			data, err := base64.StdEncoding.Strict().DecodeString(asset.DataBase64)
-			if err != nil || len(data) == 0 {
-				return ContentFingerprint{}, nil
-			}
-			item["image"] = map[string]any{"format": asset.Format, "sha256": fmt.Sprintf("%x", sha256.Sum256(data))}
 			needed[kind]--
-			used[ref] = true
 		}
 		for _, n := range needed {
 			if n != 0 {

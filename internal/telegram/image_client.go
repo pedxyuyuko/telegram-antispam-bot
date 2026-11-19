@@ -29,7 +29,18 @@ type ImageLookup struct {
 	Width      int             `json:"width,omitempty"`
 	Height     int             `json:"height,omitempty"`
 	Reference  string          `json:"reference,omitempty"`
+	Frames     []ImageFrame    `json:"frames,omitempty"`
 	Asset      vision.Asset    `json:"-"`
+}
+
+// ImageFrame is one normalized end frame of an animation lookup.
+type ImageFrame struct {
+	Position  string       `json:"position"`
+	SHA256    string       `json:"normalized_sha256"`
+	Width     int          `json:"width"`
+	Height    int          `json:"height"`
+	Reference string       `json:"reference,omitempty"`
+	Asset     vision.Asset `json:"-"`
 }
 
 func imageHTTPClient(client bot.HttpClient) *http.Client {
@@ -134,6 +145,20 @@ func (c *Client) LookupImage(ctx context.Context, source ImageSource) (result Im
 	if len(raw) > vision.MaxImageBytes {
 		result.Status = "limit"
 		result.Error = "image exceeds download budget"
+		return result
+	}
+	if source.Frames {
+		frames, err := vision.ExtractFrames(ctx, raw, "", "")
+		if err != nil {
+			result.Error = err.Error()
+			return result
+		}
+		for _, f := range frames {
+			result.Frames = append(result.Frames, ImageFrame{Position: f.Position, SHA256: f.Image.SHA256, Width: f.Image.Width, Height: f.Image.Height, Asset: f.Image.Asset()})
+		}
+		result.Status = "available"
+		result.Downloaded = raw
+		result.SHA256, result.Width, result.Height = result.Frames[0].SHA256, result.Frames[0].Width, result.Frames[0].Height
 		return result
 	}
 	im, err := vision.Normalize(raw)

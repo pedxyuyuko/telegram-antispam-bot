@@ -238,16 +238,9 @@ func (c *Client) RichContext(ctx context.Context, m *Message, profile Profile, s
 			l = c.LookupImage(download, slot.source)
 		}
 		if l.Status == "available" {
-			ref, err := newImageReference(material, assets)
-			if err != nil {
+			if err := attachLookup(material, assets, slot.owner, &l); err != nil {
 				return nil, nil, nil, err
 			}
-			slot.owner["image"] = ref
-			if l.Source.Preview {
-				slot.owner["image_source"] = "thumbnail"
-			}
-			assets[ref] = l.Asset
-			l.Reference = ref
 		}
 		lookups = append(lookups, l)
 	}

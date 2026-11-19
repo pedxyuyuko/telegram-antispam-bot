@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"image"
 	"image/color"
+	"image/gif"
 	"image/png"
 	"io"
 	"log/slog"
@@ -258,6 +259,124 @@ func TestImageEnrichmentPreservesPresentedContextOrder(t *testing.T) {
 		plain, err := WithoutImages(state, assets)
 		if err != nil || !bytes.Equal(before, plain) {
 			t.Fatalf("text fallback changed existing presentation: %s %v", plain, err)
+		}
+	}
+}
+
+func twoFrameGIF(t *testing.T) []byte {
+	t.Helper()
+	pal := []color.Color{color.RGBA{R: 255, A: 255}, color.RGBA{B: 255, A: 255}}
+	frame := func(i uint8) *image.Paletted {
+		f := image.NewPaletted(image.Rect(0, 0, 320, 280), pal)
+		for p := range f.Pix {
+			f.Pix[p] = i
+		}
+		return f
+	}
+	var b bytes.Buffer
+	if err := gif.EncodeAll(&b, &gif.GIF{Image: []*image.Paletted{frame(0), frame(1)}, Delay: []int{10, 10}}); err != nil {
+		t.Fatal(err)
+	}
+	return b.Bytes()
+}
+
+func TestImageSourcesTakeAnimationsAndGIFDocumentsAsFrames(t *testing.T) {
+	for _, tc := range []struct {
+		raw, kind, id   string
+		frames, preview bool
+	}{
+		{`{"animation":{"file_id":"a","file_unique_id":"ua","width":320,"height":280,"mime_type":"video/mp4","file_size":1000},"document":{"file_id":"a","file_unique_id":"ua","mime_type":"video/mp4"}}`, "animation", "a", true, false},
+		{`{"document":{"file_id":"g","file_unique_id":"ug","mime_type":"image/gif","file_size":1000}}`, "document", "g", true, false},
+		{`{"animation":{"file_id":"big","file_unique_id":"ub","mime_type":"video/mp4","file_size":5000000,"thumbnail":{"file_id":"th","file_unique_id":"ut","width":320,"height":180}}}`, "animation", "th", false, true},
+	} {
+		sources := fingerprintMessage(t, tc.raw).ImageSources()
+		if len(sources) != 1 || sources[0].Kind != tc.kind || sources[0].FileID != tc.id || sources[0].Frames != tc.frames || sources[0].Preview != tc.preview {
+			t.Fatalf("%s: sources=%+v", tc.raw, sources)
+		}
+	}
+	if s := fingerprintMessage(t, `{"document":{"file_id":"d","mime_type":"application/pdf"}}`).ImageSources(); len(s) != 0 {
+		t.Fatalf("non-image document became image source: %+v", s)
+	}
+}
+
+func TestAnimationLookupDownloadsOnceAndReturnsEndFrames(t *testing.T) {
+	raw := twoFrameGIF(t)
+	var downloads atomic.Int32
+	c := imageClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/getFile") {
+			w.Write([]byte(`{"ok":true,"result":{"file_id":"g","file_unique_id":"ug","file_path":"documents/g.gif"}}`))
+			return
+		}
+		downloads.Add(1)
+		w.Write(raw)
+	})
+	lookup := c.LookupImage(context.Background(), ImageSource{Kind: "document", Frames: true, FileID: "g", FileUniqueID: "ug"})
+	if lookup.Status != "available" || downloads.Load() != 1 || !bytes.Equal(lookup.Downloaded, raw) || len(lookup.Frames) != 2 {
+		t.Fatalf("lookup=%+v", lookup)
+	}
+	if lookup.Frames[0].Position != "first" || lookup.Frames[1].Position != "last" || lookup.Frames[0].SHA256 == lookup.Frames[1].SHA256 || lookup.Frames[1].Asset.Format != "png" {
+		t.Fatalf("frames=%+v", lookup.Frames)
+	}
+}
+
+func TestAnimationFramesAttachFingerprintAndFallBackCleanly(t *testing.T) {
+	m := fingerprintMessage(t, `{"caption":"ad","animation":{"file_id":"a","file_unique_id":"ua","mime_type":"video/mp4","file_size":1000},"document":{"file_id":"a","file_unique_id":"ua","mime_type":"video/mp4"}}`)
+	base, err := m.SegmentedModelState(Profile{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame := func(c color.Color) ImageFrame {
+		im, err := vision.Normalize(imageFixture(t, c))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ImageFrame{SHA256: im.SHA256, Width: im.Width, Height: im.Height, Asset: im.Asset()}
+	}
+	red, blue := frame(color.RGBA{R: 255, A: 255}), frame(color.RGBA{B: 255, A: 255})
+	var previous string
+	for i, ends := range [][2]ImageFrame{{red, blue}, {red, blue}, {red, red}} {
+		first, last := ends[0], ends[1]
+		first.Position, last.Position = "first", "last"
+		lookups := []ImageLookup{{Source: ImageSource{Kind: "animation", Frames: true}, Status: "available", Frames: []ImageFrame{first, last}}}
+		state, assets, err := AttachImages(base, lookups)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(assets) != 2 || lookups[0].Frames[0].Reference == "" || lookups[0].Frames[1].Reference == "" {
+			t.Fatalf("frame references missing: %s", state)
+		}
+		_, media, _ := currentMedia(state)
+		var animation, document map[string]any
+		for _, item := range media {
+			switch item["type"] {
+			case "animation":
+				animation = item
+			case "document":
+				document = item
+			}
+		}
+		frames, _ := animation["frames"].([]any)
+		if len(frames) != 2 || frames[0].(map[string]any)["position"] != "first" || frames[1].(map[string]any)["image"] != lookups[0].Frames[1].Reference || document["frames"] != nil || document["image"] != nil {
+			t.Fatalf("frames attached to wrong item: %s", state)
+		}
+		f, err := m.VisualContentFingerprint(state, assets)
+		if err != nil || f.Hash == "" {
+			t.Fatalf("fingerprint=%+v %v", f, err)
+		}
+		if i == 1 && f.Hash != previous {
+			t.Fatal("random frame references changed the content key")
+		}
+		if i == 2 && f.Hash == previous {
+			t.Fatal("different last frame reused the content key")
+		}
+		previous = f.Hash
+		partial := vision.Assets{lookups[0].Frames[0].Reference: assets[lookups[0].Frames[0].Reference]}
+		if f, _ := m.VisualContentFingerprint(state, partial); f.Hash != "" {
+			t.Fatal("missing frame published a content key")
+		}
+		plain, err := WithoutImages(state, assets)
+		if err != nil || !bytes.Equal(plain, base) {
+			t.Fatalf("text fallback kept frame material: %s %v", plain, err)
 		}
 	}
 }
