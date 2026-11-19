@@ -54,7 +54,12 @@ func Normalize(raw []byte) (Image, error) {
 	if err != nil {
 		return Image{}, fmt.Errorf("decode image: %w", err)
 	}
-	im = orient(im, exifOrientation(raw, format))
+	return normalizeDecoded(orient(im, exifOrientation(raw, format)))
+}
+
+// normalizeDecoded flattens transparency onto white and fits every edge into
+// the SORS range. Frame extraction shares it after its own decode checks.
+func normalizeDecoded(im image.Image) (Image, error) {
 	w, h := im.Bounds().Dx(), im.Bounds().Dy()
 	longest := max(w, h)
 	scale := 1.0
