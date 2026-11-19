@@ -148,7 +148,7 @@ func (c *Client) LookupImage(ctx context.Context, source ImageSource) (result Im
 		return result
 	}
 	if source.Frames {
-		frames, err := vision.ExtractFrames(ctx, raw, "", "")
+		frames, err := vision.ExtractFrames(ctx, raw)
 		if err != nil {
 			result.Error = err.Error()
 			return result

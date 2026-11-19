@@ -8,9 +8,6 @@ import (
 	"image/color/palette"
 	"image/gif"
 	"image/png"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -63,7 +60,7 @@ func TestGIFFramesCompositeFirstAndLastCanvas(t *testing.T) {
 		Disposal: []byte{gif.DisposalNone, gif.DisposalNone},
 		Config:   image.Config{Width: 320, Height: 280},
 	})
-	frames, err := ExtractFrames(context.Background(), raw, "", t.TempDir())
+	frames, err := ExtractFrames(context.Background(), raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +83,7 @@ func TestGIFDisposalBackgroundClearsPreviousFrameRegion(t *testing.T) {
 		Disposal: []byte{gif.DisposalBackground, gif.DisposalNone},
 		Config:   image.Config{Width: 320, Height: 280},
 	})
-	frames, err := ExtractFrames(context.Background(), raw, "", t.TempDir())
+	frames, err := ExtractFrames(context.Background(), raw)
 	if err != nil || len(frames) != 2 {
 		t.Fatalf("frames=%+v err=%v", frames, err)
 	}
@@ -101,7 +98,7 @@ func TestGIFDisposalBackgroundClearsPreviousFrameRegion(t *testing.T) {
 
 func TestSingleFrameGIFProducesOneFrame(t *testing.T) {
 	raw := encodeGIF(t, &gif.GIF{Image: []*image.Paletted{gifFrame(image.Rect(0, 0, 320, 280), red)}, Delay: []int{0}})
-	frames, err := ExtractFrames(context.Background(), raw, "", t.TempDir())
+	frames, err := ExtractFrames(context.Background(), raw)
 	if err != nil || len(frames) != 1 || frames[0].Position != "single" {
 		t.Fatalf("frames=%+v err=%v", frames, err)
 	}
@@ -118,7 +115,7 @@ func TestGIFDecodedPixelBudgetIsCheckedBeforeDecoding(t *testing.T) {
 	}
 	raw = append(raw, 0x3b)
 	started := time.Now()
-	if _, err := ExtractFrames(context.Background(), raw, "", t.TempDir()); err == nil {
+	if _, err := ExtractFrames(context.Background(), raw); err == nil {
 		t.Fatal("GIF exceeding the total decoded-pixel budget was decoded")
 	}
 	if time.Since(started) > time.Second {
@@ -126,67 +123,21 @@ func TestGIFDecodedPixelBudgetIsCheckedBeforeDecoding(t *testing.T) {
 	}
 }
 
-func ffmpegForTest(t *testing.T) string {
-	t.Helper()
-	path, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		t.Skip("ffmpeg unavailable")
+func TestNonGIFAnimationIsRejectedWithoutExternalDecoder(t *testing.T) {
+	// An MP4 header (ftyp box) or any other container is refused outright;
+	// only GIF is decoded, in-process.
+	mp4 := append([]byte{0, 0, 0, 0x18}, []byte("ftypisom\x00\x00\x02\x00isomiso2")...)
+	for _, raw := range [][]byte{mp4, []byte("not a video")} {
+		if _, err := ExtractFrames(context.Background(), raw); err == nil {
+			t.Fatalf("non-GIF animation accepted: %q", raw)
+		}
 	}
-	return path
-}
-
-func redThenBlueMP4(t *testing.T, ffmpeg string) []byte {
-	t.Helper()
-	out := filepath.Join(t.TempDir(), "sample.mp4")
-	cmd := exec.Command(ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error",
-		"-f", "lavfi", "-i", "color=c=red:s=320x280:d=0.5:r=10",
-		"-f", "lavfi", "-i", "color=c=blue:s=320x280:d=0.5:r=10",
-		"-filter_complex", "[0:v][1:v]concat=n=2:v=1[v]", "-map", "[v]",
-		"-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart", out)
-	if raw, err := cmd.CombinedOutput(); err != nil {
-		t.Skipf("cannot build H.264 sample: %v %s", err, raw)
-	}
-	raw, err := os.ReadFile(out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return raw
-}
-
-func TestMP4AnimationFramesUseFFmpegFirstAndLastFrame(t *testing.T) {
-	ffmpeg := ffmpegForTest(t)
-	raw := redThenBlueMP4(t, ffmpeg)
-	scratch := t.TempDir()
-	frames, err := ExtractFrames(context.Background(), raw, ffmpeg, scratch)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(frames) != 2 || frames[0].Position != "first" || frames[1].Position != "last" {
-		t.Fatalf("frames=%+v", frames)
-	}
-	if !near(pixel(t, frames[0].Image, 160, 140), red) || !near(pixel(t, frames[1].Image, 160, 140), blue) {
-		t.Fatal("MP4 first/last frame mismatch")
-	}
-	if left, _ := os.ReadDir(scratch); len(left) != 0 {
-		t.Fatalf("scratch files left behind: %v", left)
-	}
-}
-
-func TestMP4FrameExtractionFailuresAreBounded(t *testing.T) {
-	ffmpeg := ffmpegForTest(t)
-	if _, err := ExtractFrames(context.Background(), []byte("not a video"), ffmpeg, t.TempDir()); err == nil {
-		t.Fatal("corrupt animation accepted")
-	}
-	if _, err := ExtractFrames(context.Background(), redThenBlueMP4(t, ffmpeg), filepath.Join(t.TempDir(), "missing-ffmpeg"), t.TempDir()); err == nil {
-		t.Fatal("missing ffmpeg reported success")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
-	defer cancel()
-	time.Sleep(time.Millisecond)
-	if _, err := ExtractFrames(ctx, redThenBlueMP4(t, ffmpeg), ffmpeg, t.TempDir()); err == nil {
-		t.Fatal("expired deadline ignored")
-	}
-	if _, err := ExtractFrames(context.Background(), make([]byte, MaxImageBytes+1), ffmpeg, t.TempDir()); err == nil {
+	if _, err := ExtractFrames(context.Background(), make([]byte, MaxImageBytes+1)); err == nil {
 		t.Fatal("oversized animation accepted")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := ExtractFrames(ctx, encodeGIF(t, &gif.GIF{Image: []*image.Paletted{gifFrame(image.Rect(0, 0, 320, 280), red)}, Delay: []int{0}})); err == nil {
+		t.Fatal("cancelled extraction reported success")
 	}
 }
