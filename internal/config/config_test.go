@@ -195,3 +195,30 @@ func TestImageInferenceTimeoutHasIndependentValidatedDefault(t *testing.T) {
 		}
 	}
 }
+
+func TestPublicPagesDefaultOffAndReloadWithoutRestart(t *testing.T) {
+	p := fixture(t)
+	m, err := Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Snapshot().PublicPages {
+		t.Fatal("t.me page reads enabled by default")
+	}
+	raw, _ := os.ReadFile(p)
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		t.Fatal(err)
+	}
+	object["public_pages"] = json.RawMessage(`true`)
+	raw, _ = json.Marshal(object)
+	if err := os.WriteFile(p, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Reload(); err != nil || !m.Snapshot().PublicPages {
+		t.Fatalf("public page switch needs a restart: %v", err)
+	}
+	if _, err := Decode([]byte(`{"owner_ids":[9],"model":{"name":"m"},"public_pages":"yes"}`)); err == nil {
+		t.Fatal("non-boolean switch accepted")
+	}
+}

@@ -73,6 +73,9 @@ type Config struct {
 	Base           Policy                         `json:"base"`
 	Groups         map[string]json.RawMessage     `json:"groups"`
 	JoinGate       *JoinGate                      `json:"join_gate,omitempty"`
+	// PublicPages lets reference lookups read t.me preview pages for what the
+	// Bot API cannot return; reloadable, off by default.
+	PublicPages bool `json:"public_pages,omitempty"`
 }
 
 // Defaults is safe to inspect offline. A served model name and owners are required
