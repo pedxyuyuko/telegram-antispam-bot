@@ -280,14 +280,17 @@ func twoFrameGIF(t *testing.T) []byte {
 	return b.Bytes()
 }
 
-func TestImageSourcesTakeAnimationsAndGIFDocumentsAsFrames(t *testing.T) {
+func TestImageSourcesUseAnimationThumbnailsAndGIFDocumentFrames(t *testing.T) {
 	for _, tc := range []struct {
 		raw, kind, id   string
 		frames, preview bool
 	}{
-		{`{"animation":{"file_id":"a","file_unique_id":"ua","width":320,"height":280,"mime_type":"video/mp4","file_size":1000},"document":{"file_id":"a","file_unique_id":"ua","mime_type":"video/mp4"}}`, "animation", "a", true, false},
+		// The MP4 itself is never fetched: only Telegram's own still preview.
+		{`{"animation":{"file_id":"a","file_unique_id":"ua","width":320,"height":280,"mime_type":"video/mp4","file_size":1000,"thumbnail":{"file_id":"th","file_unique_id":"ut","width":320,"height":280}},"document":{"file_id":"a","file_unique_id":"ua","mime_type":"video/mp4"}}`, "animation", "th", false, true},
+		{`{"animation":{"file_id":"a","file_unique_id":"ua","mime_type":"video/mp4","thumb":{"file_id":"old","file_unique_id":"uo","width":90,"height":90}}}`, "animation", "old", false, true},
+		{`{"animation":{"file_id":"a","file_unique_id":"ua","mime_type":"video/mp4"}}`, "animation", "", false, true},
 		{`{"document":{"file_id":"g","file_unique_id":"ug","mime_type":"image/gif","file_size":1000}}`, "document", "g", true, false},
-		{`{"animation":{"file_id":"big","file_unique_id":"ub","mime_type":"video/mp4","file_size":5000000,"thumbnail":{"file_id":"th","file_unique_id":"ut","width":320,"height":180}}}`, "animation", "th", false, true},
+		{`{"document":{"file_id":"big","file_unique_id":"ub","mime_type":"image/gif","file_size":5000000,"thumbnail":{"file_id":"th","file_unique_id":"ut","width":320,"height":180}}}`, "document", "th", false, true},
 	} {
 		sources := fingerprintMessage(t, tc.raw).ImageSources()
 		if len(sources) != 1 || sources[0].Kind != tc.kind || sources[0].FileID != tc.id || sources[0].Frames != tc.frames || sources[0].Preview != tc.preview {
@@ -299,7 +302,7 @@ func TestImageSourcesTakeAnimationsAndGIFDocumentsAsFrames(t *testing.T) {
 	}
 }
 
-func TestAnimationLookupDownloadsOnceAndReturnsEndFrames(t *testing.T) {
+func TestGIFDocumentLookupDownloadsOnceAndReturnsEndFrames(t *testing.T) {
 	raw := twoFrameGIF(t)
 	var downloads atomic.Int32
 	c := imageClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -319,8 +322,8 @@ func TestAnimationLookupDownloadsOnceAndReturnsEndFrames(t *testing.T) {
 	}
 }
 
-func TestAnimationFramesAttachFingerprintAndFallBackCleanly(t *testing.T) {
-	m := fingerprintMessage(t, `{"caption":"ad","animation":{"file_id":"a","file_unique_id":"ua","mime_type":"video/mp4","file_size":1000},"document":{"file_id":"a","file_unique_id":"ua","mime_type":"video/mp4"}}`)
+func TestGIFFramesAttachFingerprintAndFallBackCleanly(t *testing.T) {
+	m := fingerprintMessage(t, `{"caption":"ad","document":{"file_id":"g","file_unique_id":"ug","mime_type":"image/gif","file_size":1000}}`)
 	base, err := m.SegmentedModelState(Profile{}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -337,7 +340,7 @@ func TestAnimationFramesAttachFingerprintAndFallBackCleanly(t *testing.T) {
 	for i, ends := range [][2]ImageFrame{{red, blue}, {red, blue}, {red, red}} {
 		first, last := ends[0], ends[1]
 		first.Position, last.Position = "first", "last"
-		lookups := []ImageLookup{{Source: ImageSource{Kind: "animation", Frames: true}, Status: "available", Frames: []ImageFrame{first, last}}}
+		lookups := []ImageLookup{{Source: ImageSource{Kind: "document", Frames: true}, Status: "available", Frames: []ImageFrame{first, last}}}
 		state, assets, err := AttachImages(base, lookups)
 		if err != nil {
 			t.Fatal(err)
@@ -346,17 +349,8 @@ func TestAnimationFramesAttachFingerprintAndFallBackCleanly(t *testing.T) {
 			t.Fatalf("frame references missing: %s", state)
 		}
 		_, media, _ := currentMedia(state)
-		var animation, document map[string]any
-		for _, item := range media {
-			switch item["type"] {
-			case "animation":
-				animation = item
-			case "document":
-				document = item
-			}
-		}
-		frames, _ := animation["frames"].([]any)
-		if len(frames) != 2 || frames[0].(map[string]any)["position"] != "first" || frames[1].(map[string]any)["image"] != lookups[0].Frames[1].Reference || document["frames"] != nil || document["image"] != nil {
+		frames, _ := media[0]["frames"].([]any)
+		if len(media) != 1 || len(frames) != 2 || frames[0].(map[string]any)["position"] != "first" || frames[1].(map[string]any)["image"] != lookups[0].Frames[1].Reference || media[0]["image"] != nil {
 			t.Fatalf("frames attached to wrong item: %s", state)
 		}
 		f, err := m.VisualContentFingerprint(state, assets)

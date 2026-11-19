@@ -102,8 +102,9 @@ func (m *Message) ImageSources() []ImageSource {
 		}
 		source := a.ImageSource
 		source.Kind, source.Preview, source.Frames = kind, false, true
-		if source.FileSize > vision.MaxImageBytes {
-			// Too large to fetch whole: fall back to Telegram's still preview.
+		// Animations are MP4 files whose decoding would hand untrusted video
+		// to a native codec; they, like oversized GIFs, use Telegram's still.
+		if kind == "animation" || source.FileSize > vision.MaxImageBytes {
 			source = ImageSource{Kind: kind, Preview: true}
 			if thumb := cmp.Or(a.Thumbnail, a.Thumb); thumb != nil {
 				source = *thumb
