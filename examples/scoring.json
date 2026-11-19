@@ -1,6 +1,7 @@
 {
   "owner_ids": [123456789],
   "model": {"base_url": "http://127.0.0.1:8000", "name": "replace-with-served-model-name"},
+  "public_pages": false,
   "question_groups": {
     "content": {
       "solicit": {
