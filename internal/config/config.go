@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Question struct {
@@ -75,7 +76,24 @@ type Config struct {
 	JoinGate       *JoinGate                      `json:"join_gate,omitempty"`
 	// PublicPages lets reference lookups read t.me preview pages for what the
 	// Bot API cannot return; reloadable, off by default.
-	PublicPages bool `json:"public_pages,omitempty"`
+	PublicPages PublicPages `json:"public_pages,omitzero"`
+}
+
+// PublicPages caches found t.me pages separately from Bot API lookups, so a
+// short profile cache does not refetch slow-changing public descriptions.
+type PublicPages struct {
+	Enabled      bool `json:"enabled"`
+	CacheSeconds *int `json:"cache_seconds,omitempty"`
+}
+
+const maxPublicPageCacheSeconds = 7 * 24 * 3600
+
+// Cache is the reuse window for found pages; zero disables the page cache.
+func (p PublicPages) Cache() time.Duration {
+	if p.CacheSeconds == nil {
+		return 24 * time.Hour
+	}
+	return time.Duration(*p.CacheSeconds) * time.Second
 }
 
 // Defaults is safe to inspect offline. A served model name and owners are required
@@ -122,6 +140,9 @@ func (c Config) Validate() error {
 	}
 	if c.Database == "" || !endpoint(c.Telegram.APIBase) || c.Telegram.TokenEnv == "" {
 		return errors.New("invalid database or Telegram settings")
+	}
+	if n := c.PublicPages.CacheSeconds; n != nil && (*n < 0 || *n > maxPublicPageCacheSeconds) {
+		return fmt.Errorf("public_pages.cache_seconds must be between 0 and %d", maxPublicPageCacheSeconds)
 	}
 	if c.Telegram.PollTimeoutSeconds < 5 || c.Telegram.PollTimeoutSeconds > 50 || c.Telegram.ProfileCacheSeconds < 0 {
 		return errors.New("invalid Telegram timeouts")

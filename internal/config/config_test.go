@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func fixture(t *testing.T) string {
@@ -202,23 +203,32 @@ func TestPublicPagesDefaultOffAndReloadWithoutRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Snapshot().PublicPages {
-		t.Fatal("t.me page reads enabled by default")
+	if pages := m.Snapshot().PublicPages; pages.Enabled || pages.Cache() != 24*time.Hour {
+		t.Fatalf("t.me page defaults=%+v", pages)
 	}
 	raw, _ := os.ReadFile(p)
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &object); err != nil {
 		t.Fatal(err)
 	}
-	object["public_pages"] = json.RawMessage(`true`)
+	object["public_pages"] = json.RawMessage(`{"enabled":true,"cache_seconds":3600}`)
 	raw, _ = json.Marshal(object)
 	if err := os.WriteFile(p, raw, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.Reload(); err != nil || !m.Snapshot().PublicPages {
+	if err := m.Reload(); err != nil {
 		t.Fatalf("public page switch needs a restart: %v", err)
 	}
-	if _, err := Decode([]byte(`{"owner_ids":[9],"model":{"name":"m"},"public_pages":"yes"}`)); err == nil {
-		t.Fatal("non-boolean switch accepted")
+	if pages := m.Snapshot().PublicPages; !pages.Enabled || pages.Cache() != time.Hour {
+		t.Fatalf("reloaded=%+v", pages)
+	}
+	for _, value := range []string{`true`, `{"enabled":"yes"}`, `{"enabled":true,"cache_seconds":-1}`, `{"enabled":true,"cache_seconds":604801}`, `{"enabled":true,"ttl":5}`} {
+		if _, err := Decode([]byte(`{"owner_ids":[9],"model":{"name":"m"},"public_pages":` + value + `}`)); err == nil {
+			t.Errorf("accepted public_pages=%s", value)
+		}
+	}
+	c, err := Decode([]byte(`{"owner_ids":[9],"model":{"name":"m"},"public_pages":{"enabled":true,"cache_seconds":0}}`))
+	if err != nil || c.PublicPages.Cache() != 0 {
+		t.Fatalf("zero must disable the separate page cache: %+v %v", c.PublicPages, err)
 	}
 }

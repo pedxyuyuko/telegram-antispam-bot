@@ -87,7 +87,7 @@ func (a *App) lookupReferenceWithinBudget(budget context.Context, ref telegram.R
 	if result.Status == "unavailable" && budget.Err() != nil {
 		return exhausted(result)
 	}
-	if !a.Config.Snapshot().PublicPages || !needsPublicPage(result) {
+	if !a.Config.Snapshot().PublicPages.Enabled || !needsPublicPage(result) {
 		return result
 	}
 	// The t.me page shares the per-message request count and time budget.

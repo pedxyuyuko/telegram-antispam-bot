@@ -296,7 +296,7 @@ func pageGateway(t *testing.T, a *App, path string, enabled bool) (api, pages *a
 	}))
 	t.Cleanup(page.Close)
 	c := a.Config.Snapshot()
-	c.PublicPages = enabled
+	c.PublicPages.Enabled = enabled
 	saveScoringConfig(t, a, path, c)
 	cfg := c.Telegram
 	cfg.APIBase = s.URL
