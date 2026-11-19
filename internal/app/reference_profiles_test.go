@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -250,5 +251,111 @@ func TestReferenceBudgetExpiringDuringQueryStaysLocal(t *testing.T) {
 	result := a.lookupReferenceWithinBudget(budget, ref, 0, &requests)
 	if result.Status != "limit" || requests != 1 {
 		t.Fatalf("parent query budget contaminated shared cache: %+v requests=%d", result, requests)
+	}
+}
+
+// pageGateway serves Bot API getChat for a bot without description plus t.me
+// preview pages, and switches the global public-page option.
+func pageGateway(t *testing.T, a *App, path string, enabled bool) (api, pages *atomic.Int32) {
+	t.Helper()
+	api, pages = &atomic.Int32{}, &atomic.Int32{}
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseMultipartForm(1 << 20)
+		switch {
+		case strings.HasSuffix(r.URL.Path, "getChatMember"):
+			fmt.Fprint(w, `{"ok":true,"result":{"status":"member","user":{"id":50,"first_name":"Member"}}}`)
+		case strings.HasSuffix(r.URL.Path, "getChat"):
+			switch r.FormValue("chat_id") {
+			case "@dsgdsyudsuibot":
+				api.Add(1)
+				fmt.Fprint(w, `{"ok":true,"result":{"id":8970955751,"type":"private","username":"dsgdsyudsuibot","first_name":"Group Help"}}`)
+			case "@unseenuser":
+				api.Add(1)
+				fmt.Fprint(w, `{"ok":false,"error_code":400,"description":"Bad Request: chat not found"}`)
+			default:
+				fmt.Fprint(w, `{"ok":true,"result":{"id":50,"type":"private","bio":"sender profile"}}`)
+			}
+		default:
+			fmt.Fprint(w, `{"ok":true,"result":true}`)
+		}
+	}))
+	t.Cleanup(s.Close)
+	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pages.Add(1)
+		fixture := map[string]string{"/dsgdsyudsuibot": "bot", "/unseenuser": "user", "/+qSxg1c_Apeo1NGZl": "invite"}[r.URL.EscapedPath()]
+		if fixture == "" {
+			t.Errorf("unexpected page %s", r.URL.Path)
+			return
+		}
+		raw, err := os.ReadFile("../telegram/testdata/tme/" + fixture + ".html")
+		if err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(raw)
+	}))
+	t.Cleanup(page.Close)
+	c := a.Config.Snapshot()
+	c.PublicPages = enabled
+	saveScoringConfig(t, a, path, c)
+	cfg := c.Telegram
+	cfg.APIBase = s.URL
+	client, err := telegram.New(cfg, "123:offline", s.Client(), 0, a.Log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.Me = a.Telegram.Me
+	client.PublicPageBase = page.URL
+	a.Telegram = client
+	return api, pages
+}
+
+func TestPublicPagesCompleteBotDescriptionsUnseenUsersAndInvites(t *testing.T) {
+	a, path := appFixture(t, "member")
+	modelFixture(t, a, path, nil)
+	api, pages := pageGateway(t, a, path, true)
+	deliver(t, a, 1, message(50, "@dsgdsyudsuibot campaign_001 @unseenuser https://t.me/+qSxg1c_Apeo1NGZl"))
+	runModel(t, a, time.Now())
+	if api.Load() != 2 || pages.Load() != 3 {
+		t.Fatalf("api=%d pages=%d", api.Load(), pages.Load())
+	}
+	for query, want := range map[string]int{
+		`json_extract(state,'$.message[0].profile.bio') LIKE '发财新項木%' AND json_extract(state,'$.message[0].profile.kind')='bot' AND json_extract(state,'$.message[0].profile.name')='Group Help'`: 1,
+		`json_extract(state,'$.message[2].profile.name')='Alice' AND json_extract(state,'$.message[2].profile.kind')='user'`:                                                                      1,
+		`json_extract(state,'$.message[4].profile.name')='U享社 · 搬砖USDT赚钱交流群' AND json_extract(state,'$.message[4].profile.audience')='35 430 members, 609 online'`:                                1,
+	} {
+		if scalar(t, path, `SELECT count(*) FROM revisions WHERE `+query) != want {
+			raw := scalar(t, path, `SELECT count(*) FROM revisions`)
+			t.Fatalf("profile material missing: %s (revisions=%d)", query, raw)
+		}
+	}
+	if scalar(t, path, `SELECT count(*) FROM reference_profiles WHERE status='available' AND json_extract(payload,'$.page.found')=1`) != 3 {
+		t.Fatal("page audit not archived with the lookup")
+	}
+}
+
+func TestPublicPagesStayOffUnlessEnabled(t *testing.T) {
+	a, path := appFixture(t, "member")
+	modelFixture(t, a, path, nil)
+	_, pages := pageGateway(t, a, path, false)
+	deliver(t, a, 1, message(50, "@dsgdsyudsuibot @unseenuser https://t.me/+qSxg1c_Apeo1NGZl"))
+	runModel(t, a, time.Now())
+	if pages.Load() != 0 || scalar(t, path, `SELECT count(*) FROM reference_profiles WHERE status='available'`) != 1 {
+		t.Fatal("public pages read while disabled")
+	}
+}
+
+func TestPublicPageRequestsShareTheReferenceBudget(t *testing.T) {
+	a, path := appFixture(t, "member")
+	_, pages := pageGateway(t, a, path, true)
+	ref, _ := telegram.ParseReference("https://t.me/+qSxg1c_Apeo1NGZl")
+	requests := 8
+	result := a.lookupReferenceWithinBudget(context.Background(), ref, 0, &requests)
+	if result.Status == "available" || pages.Load() != 0 {
+		t.Fatalf("exhausted budget still read a page: %+v", result)
+	}
+	requests = 0
+	if result = a.lookupReferenceWithinBudget(context.Background(), ref, 0, &requests); result.Status != "available" || requests != 1 {
+		t.Fatalf("invite page not counted: %+v requests=%d", result, requests)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"telegram-antispam-bot/internal/store"
@@ -61,16 +62,52 @@ func (a *App) referencedProfiles(ctx context.Context, j store.Job, m *telegram.M
 }
 
 func (a *App) lookupReferenceWithinBudget(budget context.Context, ref telegram.Reference, known int64, requests *int) telegram.ReferenceLookup {
-	if ref.Username != "" {
+	spend := func() bool {
 		if budget.Err() != nil || *requests >= 8 {
-			return telegram.ReferenceLookup{Reference: ref, Status: "limit", Error: "per-message reference query budget exhausted", FetchedAt: time.Now().UnixMilli()}
+			return false
 		}
 		*requests += 1
+		return true
 	}
-	result := a.Telegram.LookupReference(budget, ref, known)
+	exhausted := func(result telegram.ReferenceLookup) telegram.ReferenceLookup {
+		result.Reference, result.Status = ref, "limit"
+		result.Error = strings.TrimSuffix("per-message reference query budget exhausted: "+result.Error, ": ")
+		if result.FetchedAt == 0 {
+			result.FetchedAt = time.Now().UnixMilli()
+		}
+		return result
+	}
+	var result telegram.ReferenceLookup
+	if ref.Username != "" {
+		if !spend() {
+			return exhausted(telegram.ReferenceLookup{})
+		}
+	}
+	result = a.Telegram.LookupReference(budget, ref, known)
 	if result.Status == "unavailable" && budget.Err() != nil {
-		result.Status = "limit"
-		result.Error = "per-message reference query budget exhausted: " + result.Error
+		return exhausted(result)
 	}
+	if !a.Config.Snapshot().PublicPages || !needsPublicPage(result) {
+		return result
+	}
+	// The t.me page shares the per-message request count and time budget.
+	if !spend() {
+		return result
+	}
+	result.MergePublicPage(a.Telegram.PublicPage(budget, ref))
 	return result
+}
+
+// needsPublicPage selects what the Bot API cannot supply: invite links,
+// usernames it cannot resolve, and private accounts without a description.
+func needsPublicPage(l telegram.ReferenceLookup) bool {
+	switch l.Status {
+	case "unsupported":
+		return strings.HasPrefix(l.Reference.Key, "invite:")
+	case "unavailable":
+		return l.Reference.Username != ""
+	case "available":
+		return l.Profile.Kind == "private" && l.Profile.Bio == ""
+	}
+	return false
 }
