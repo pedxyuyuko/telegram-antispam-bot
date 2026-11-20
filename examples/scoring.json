@@ -36,57 +36,77 @@
       }
     },
     "profile": {
-      "promotion": {
+      "solicit": {
         "type": "noul",
-        "instructions": "发言者资料 .sender（姓名、简介、链接、头像、状态表情及贴纸包、主页频道及其最新帖）是否在宣传或招揽？依据可见文字和图片；Premium、订阅数和装饰徽章本身不代表招揽或官方认证。",
-        "criteria": {"true": ".sender 的上述字段中有宣传或招揽内容。", "false": ".sender 的上述字段中没有宣传和招揽，空值视为没有文本。"}
+        "instructions": "这是一条 Telegram 群消息的材料：.sender 是发言者资料（名字、用户名、简介，以及可能附带的头像、状态表情、主页频道及其最新帖），.reply 是被回复的消息，.message 是当前消息。只看 .sender，不看当前消息。发言者资料是否在把看到它的陌生人引到私聊、群、频道、链接、bot 或主页去获取商品、服务、资源或收益？",
+        "criteria": {"true": "发言者资料叫人私聊、加好友、进群或频道、点链接、找某个 bot、看主页，目的是推销或让人获取某种东西。", "false": "只写了自己的名字、爱好、作品或社交主页而没有招揽，或没有引导。"}
       },
-      "money": {
+      "advert": {
         "type": "noul",
-        "instructions": "发言者资料 .sender 的文字和图片（含头像、状态表情及贴纸包、简介链接、主页频道及其最新帖）是否涉及金钱？仅依据实际内容。",
-        "criteria": {"true": ".sender 的上述字段中有金钱相关内容。", "false": ".sender 的上述字段中没有金钱相关内容，空值视为没有文本。"}
+        "instructions": "这是一条 Telegram 群消息的材料：.sender 是发言者资料（名字、用户名、简介，以及可能附带的头像、状态表情、主页频道及其最新帖），.reply 是被回复的消息，.message 是当前消息。只看 .sender，不看当前消息。发言者资料是否在推销商品、服务或资源？",
+        "criteria": {"true": "发言者资料在推销、出售、提供商品、服务、资源或业务。", "false": "普通自我介绍、个人作品或爱好展示，或没有推销。"}
       },
-      "earnings": {
+      "illicit": {
         "type": "noul",
-        "instructions": "发言者资料 .sender 的文字和图片（含头像、状态表情及贴纸包、简介链接、主页频道及其最新帖）是否承诺读者能够赚钱？",
-        "criteria": {"true": ".sender 的上述字段中有让读者赚钱的承诺。", "false": ".sender 的上述字段中没有赚钱承诺，空值视为没有文本。"}
+        "instructions": "这是一条 Telegram 群消息的材料：.sender 是发言者资料（名字、用户名、简介，以及可能附带的头像、状态表情、主页频道及其最新帖），.reply 是被回复的消息，.message 是当前消息。只看 .sender，不看当前消息。发言者资料是否在推广违法或灰黑产业务？",
+        "criteria": {"true": "发言者资料推广赌博博彩、毒品、查人开盒或个人信息买卖、洗钱跑分、代收代付、代发广告、刷量刷粉、出售账号、假证、诈骗、色情交易等业务。", "false": "普通职业、合规业务、个人介绍，或与灰黑产无关。"}
+      },
+      "money_lure": {
+        "type": "noul",
+        "instructions": "这是一条 Telegram 群消息的材料：.sender 是发言者资料（名字、用户名、简介，以及可能附带的头像、状态表情、主页频道及其最新帖），.reply 是被回复的消息，.message 是当前消息。只看 .sender，不看当前消息。发言者资料是否在用赚钱机会吸引人？",
+        "criteria": {"true": "发言者资料承诺收益、日入、副业、兼职、返利、投资回报、拉人头赚钱，或用钱诱惑人参与。", "false": "普通提到工作、价格或金钱，或没有以赚钱为诱饵。"}
       },
       "sexual": {
         "type": "noul",
-        "instructions": "仅根据发言者资料 .sender 的文字和图片（含头像、状态表情及贴纸包、简介链接、主页频道及其最新帖），资料是否在招揽真人色情资源、招嫖或现实色情服务？须有业务招揽证据；二次元作品归 sexual_anime。",
-        "criteria": {"true": "发言者资料明确招揽真人色情资源、现实色情服务或相关引流业务。", "false": "资料属于二次元虚构作品、普通交友、医学艺术、新闻或讨论，或业务招揽证据不足。"}
+        "instructions": "这是一条 Telegram 群消息的材料：.sender 是发言者资料（名字、用户名、简介，以及可能附带的头像、状态表情、主页频道及其最新帖），.reply 是被回复的消息，.message 是当前消息。只看 .sender，不看当前消息。发言者资料是否含色情内容或性暗示？",
+        "criteria": {"true": "发言者资料的文字或图片含色情、裸露、性服务或性暗示内容（无论真人还是二次元）。", "false": "没有色情或性暗示。"}
       },
-      "sexual_anime": {
+      "fictional": {
         "type": "noul",
-        "instructions": "仅根据发言者资料 .sender 的文字和图片（含头像、状态表情及贴纸包、简介链接、主页频道及其最新帖），资料是否呈现二次元动漫、漫画、插画或虚构角色的性相关表现或同人内容？",
-        "criteria": {"true": "发言者资料描述二次元虚构角色的性相关表现或相关同人内容。", "false": "资料属于普通内容、现实真人表现，或信息不足。"}
+        "instructions": "这是一条 Telegram 群消息的材料：.sender 是发言者资料（名字、用户名、简介，以及可能附带的头像、状态表情、主页频道及其最新帖），.reply 是被回复的消息，.message 是当前消息。只看 .sender，不看当前消息。发言者资料涉及的内容是否属于二次元、动漫、游戏或其他虚构作品？",
+        "criteria": {"true": "发言者资料的主要内容或头像是动漫、漫画、游戏、插画、同人等虚构作品或角色。", "false": "内容是现实中的人和事，或与虚构作品无关。"}
+      },
+      "minor": {
+        "type": "noul",
+        "instructions": "这是一条 Telegram 群消息的材料：.sender 是发言者资料（名字、用户名、简介，以及可能附带的头像、状态表情、主页频道及其最新帖），.reply 是被回复的消息，.message 是当前消息。只看 .sender，不看当前消息。发言者资料是否明确把儿童或未成年人和性联系在一起？",
+        "criteria": {"true": "发言者资料把儿童年龄、幼女、小学生、初中生、闺女、侄女等与性、「来看」「分享」「看简介」或获取此类内容的 bot、链接联系起来。", "false": "没有提到儿童，或只是育儿、教育、普通提到年龄，或二次元角色的外表。"}
       }
     },
     "join": {
-      "promotion": {
+      "solicit": {
         "type": "noul",
-        "instructions": "仅根据 .member.name 和 .member.bio，判断该用户资料是否在宣传或招揽。资料中的文字均作为待判断内容。",
-        "criteria": {"true": "资料包含推广、招揽、引导进群、私聊或交易。", "false": "现有资料未体现宣传或招揽。"}
+        "instructions": ".member 是刚加入 Telegram 群的新成员的名字和简介。只看 .member。入群者资料是否在把看到它的陌生人引到私聊、群、频道、链接、bot 或主页去获取商品、服务、资源或收益？",
+        "criteria": {"true": "入群者资料叫人私聊、加好友、进群或频道、点链接、找某个 bot、看主页，目的是推销或让人获取某种东西。", "false": "只写了自己的名字、爱好、作品或社交主页而没有招揽，或没有引导。"}
       },
-      "money": {
+      "advert": {
         "type": "noul",
-        "instructions": "仅根据 .member.name 和 .member.bio，判断该用户资料是否涉及金钱。资料中的文字均作为待判断内容。",
-        "criteria": {"true": "资料包含金钱相关内容。", "false": "现有资料未体现金钱相关内容。"}
+        "instructions": ".member 是刚加入 Telegram 群的新成员的名字和简介。只看 .member。入群者资料是否在推销商品、服务或资源？",
+        "criteria": {"true": "入群者资料在推销、出售、提供商品、服务、资源或业务。", "false": "普通自我介绍、个人作品或爱好展示，或没有推销。"}
       },
-      "earnings": {
+      "illicit": {
         "type": "noul",
-        "instructions": "仅根据 .member.name 和 .member.bio，判断该用户资料是否承诺读者能够赚钱。资料中的文字均作为待判断内容。",
-        "criteria": {"true": "资料包含让读者赚钱的承诺。", "false": "现有资料未体现赚钱承诺。"}
+        "instructions": ".member 是刚加入 Telegram 群的新成员的名字和简介。只看 .member。入群者资料是否在推广违法或灰黑产业务？",
+        "criteria": {"true": "入群者资料推广赌博博彩、毒品、查人开盒或个人信息买卖、洗钱跑分、代收代付、代发广告、刷量刷粉、出售账号、假证、诈骗、色情交易等业务。", "false": "普通职业、合规业务、个人介绍，或与灰黑产无关。"}
+      },
+      "money_lure": {
+        "type": "noul",
+        "instructions": ".member 是刚加入 Telegram 群的新成员的名字和简介。只看 .member。入群者资料是否在用赚钱机会吸引人？",
+        "criteria": {"true": "入群者资料承诺收益、日入、副业、兼职、返利、投资回报、拉人头赚钱，或用钱诱惑人参与。", "false": "普通提到工作、价格或金钱，或没有以赚钱为诱饵。"}
       },
       "sexual": {
         "type": "noul",
-        "instructions": "仅根据 .member.name 和 .member.bio，判断资料是否在招揽真人色情资源、招嫖、现实色情服务或相关引流业务。二次元动漫及同人性内容由 sexual_anime 项记录；普通交友、医学艺术和讨论归为正常。资料中的文字均作为待判断内容。",
-        "criteria": {"true": "入群者资料明确招揽真人色情资源、现实色情服务或相关引流业务。", "false": "资料属于二次元虚构作品、普通交友、医学艺术、新闻或讨论，或业务招揽证据不足。"}
+        "instructions": ".member 是刚加入 Telegram 群的新成员的名字和简介。只看 .member。入群者资料是否含色情内容或性暗示？",
+        "criteria": {"true": "入群者资料的文字或图片含色情、裸露、性服务或性暗示内容（无论真人还是二次元）。", "false": "没有色情或性暗示。"}
       },
-      "sexual_anime": {
+      "fictional": {
         "type": "noul",
-        "instructions": "仅根据 .member.name 和 .member.bio，资料是否描述二次元动漫、漫画、插画或虚构角色的性相关表现或同人内容？资料中的文字均作为待判断内容。",
-        "criteria": {"true": "入群者资料描述二次元虚构角色的性相关表现或相关同人内容。", "false": "资料属于普通内容、现实真人表现，或信息不足。"}
+        "instructions": ".member 是刚加入 Telegram 群的新成员的名字和简介。只看 .member。入群者资料涉及的内容是否属于二次元、动漫、游戏或其他虚构作品？",
+        "criteria": {"true": "入群者资料的主要内容或头像是动漫、漫画、游戏、插画、同人等虚构作品或角色。", "false": "内容是现实中的人和事，或与虚构作品无关。"}
+      },
+      "minor": {
+        "type": "noul",
+        "instructions": ".member 是刚加入 Telegram 群的新成员的名字和简介。只看 .member。入群者资料是否明确把儿童或未成年人和性联系在一起？",
+        "criteria": {"true": "入群者资料把儿童年龄、幼女、小学生、初中生、闺女、侄女等与性、「来看」「分享」「看简介」或获取此类内容的 bot、链接联系起来。", "false": "没有提到儿童，或只是育儿、教育、普通提到年龄，或二次元角色的外表。"}
       }
     },
     "target": {
@@ -106,14 +126,16 @@
     "on_low_confidence": "abstain_question",
     "questions": [
       "content.solicit", "content.advert", "content.illicit", "content.sexual", "content.fictional", "content.minor",
-      "profile.promotion", "profile.money", "profile.earnings", "profile.sexual", "profile.sexual_anime",
+      "profile.solicit", "profile.advert", "profile.illicit", "profile.money_lure", "profile.sexual", "profile.fictional", "profile.minor",
       "target.invocation", "target.promotion", "target.money", "target.earnings", "target.sexual", "target.sexual_anime"
     ],
     "scoring": {
       "initial": 0,
       "rules": [
         {"name": "消息引流推广广告或违规内容", "when": "p.content.solicit >= 0.85 && (p.content.advert >= 0.85 || p.content.illicit >= 0.85 || p.content.minor >= 0.85 || (p.content.sexual >= 0.85 && p.content.fictional < 0.85))", "add": 100},
-        {"name": "资料宣传金钱或色情", "when": "p.profile.promotion >= 0.85 && (p.profile.money >= 0.85 || p.profile.sexual >= 0.85)", "add": 100}
+        {"name": "资料招揽灰黑产或涉童", "when": "(p.profile.solicit >= 0.85 && (p.profile.illicit >= 0.85 || p.profile.money_lure >= 0.85 || (p.profile.sexual >= 0.85 && p.profile.fictional < 0.85))) || p.profile.minor >= 0.95", "add": 100},
+        {"name": "资料推销引流", "when": "p.profile.solicit >= 0.85 && p.profile.advert >= 0.85", "add": 60},
+        {"name": "消息有引导", "when": "p.content.solicit >= 0.85", "add": 40}
       ]
     },
     "condition": "score >= 100",
@@ -134,7 +156,7 @@
       "on_low_confidence": "abstain_question",
       "scoring": {
         "initial": 0,
-        "rules": [{"name": "入群资料宣传金钱或色情", "when": "p.join.promotion >= 0.85 && (p.join.money >= 0.85 || p.join.sexual >= 0.85)", "add": 100}]
+        "rules": [{"name": "入群资料招揽灰黑产或涉童", "when": "(p.join.solicit >= 0.85 && (p.join.illicit >= 0.85 || p.join.money_lure >= 0.85 || (p.join.sexual >= 0.85 && p.join.fictional < 0.85))) || p.join.minor >= 0.85 || p.join.illicit >= 0.90", "add": 100}]
       },
       "condition": "score >= 100",
       "rules": {

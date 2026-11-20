@@ -83,16 +83,13 @@ func TestExampleProvidesGroupedScoringOutsideRepository(t *testing.T) {
 		p := c.Base
 		p.Questions = []string{group + ".*"}
 		questions, err := c.SelectedQuestions(p)
-		want := 5
-		if group == "target" || group == "content" {
-			want = 6
-		}
+		want := map[string]int{"content": 6, "profile": 7, "target": 6, "join": 7}[group]
 		if err != nil || len(questions) != want {
 			t.Fatalf("question group %s has %d questions, want %d: %v", group, len(questions), want, err)
 		}
-		anime := group + ".sexual_anime"
-		if group == "content" {
-			anime = "content.fictional"
+		anime := group + ".fictional"
+		if group == "target" {
+			anime = "target.sexual_anime"
 		}
 		if questions[group+".sexual"].Type != "noul" || questions[anime].Type != "noul" {
 			t.Fatalf("%s lacks the sexual and fictional dimensions", group)
@@ -110,8 +107,8 @@ func TestExampleProvidesGroupedScoringOutsideRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(questions) != 17 {
-		t.Fatalf("want seventeen selected questions, got %d", len(questions))
+	if len(questions) != 19 {
+		t.Fatalf("want nineteen selected questions, got %d", len(questions))
 	}
 	p := map[string]float64{}
 	for id := range questions {
@@ -119,7 +116,7 @@ func TestExampleProvidesGroupedScoringOutsideRepository(t *testing.T) {
 	}
 	p["content.solicit"], p["content.advert"] = .85, .85
 	e, err := decision.EvaluatePolicy(questions, c.Base, decision.Result{Probabilities: p})
-	if err != nil || e.Score != 100 || e.Condition != expression.True {
+	if err != nil || e.Score != 140 || e.Condition != expression.True {
 		t.Fatalf("generated example lost custom scoring: %+v %v", e, err)
 	}
 }
@@ -144,13 +141,38 @@ func TestExampleJoinGateStartsDisabledAndScoresIndependentProfileAnswers(t *test
 		t.Fatal("example lacks matched join-message cleanup")
 	}
 	q, err := c.SelectedQuestions(p.Policy)
-	if err != nil || len(q) != 5 {
+	if err != nil || len(q) != 7 {
 		t.Fatal("join question selection missing")
 	}
-	for _, tc := range []struct{ promotion, money, sexual, earnings, score float64 }{{.85, .85, 0, 0, 100}, {.85, 0, .85, 0, 100}, {.849, 1, 1, 1, 0}, {1, 0, 0, 1, 0}} {
-		e, err := decision.EvaluatePolicy(q, p.Policy, decision.Result{Probabilities: map[string]float64{"join.promotion": tc.promotion, "join.money": tc.money, "join.sexual": tc.sexual, "join.earnings": tc.earnings, "join.sexual_anime": .99}})
+	// Replay of 146 join profiles: 8/8 known spam, 0/6 controls, 4/132 archive
+	// joiners (all spam). Plain shop or commission bios are not removed.
+	for _, tc := range []struct {
+		name  string
+		p     map[string]float64
+		score float64
+	}{
+		{"solicited_illicit", map[string]float64{"join.solicit": .85, "join.illicit": .85}, 100},
+		{"solicited_money_lure", map[string]float64{"join.solicit": .85, "join.money_lure": .85}, 100},
+		{"solicited_real_sexual", map[string]float64{"join.solicit": .85, "join.sexual": .85, "join.fictional": .84999}, 100},
+		{"solicited_fictional_sexual", map[string]float64{"join.solicit": .99, "join.sexual": .99, "join.fictional": .85}, 0},
+		{"plain_shop_or_commission", map[string]float64{"join.solicit": .99, "join.advert": .99}, 0},
+		{"minor_alone", map[string]float64{"join.minor": .85, "join.fictional": .99}, 100},
+		{"minor_below", map[string]float64{"join.minor": .84999}, 0},
+		{"illicit_name_alone", map[string]float64{"join.illicit": .90}, 100},
+		{"illicit_name_below", map[string]float64{"join.illicit": .89999}, 0},
+		{"solicitation_below", map[string]float64{"join.solicit": .84999, "join.illicit": .89, "join.money_lure": .99}, 0},
+		{"one_rule_per_join", map[string]float64{"join.solicit": .99, "join.illicit": .99, "join.minor": .99}, 100},
+	} {
+		probabilities := map[string]float64{}
+		for id := range q {
+			probabilities[id] = .01
+		}
+		for id, v := range tc.p {
+			probabilities[id] = v
+		}
+		e, err := decision.EvaluatePolicy(q, p.Policy, decision.Result{Probabilities: probabilities})
 		if err != nil || e.Score != tc.score {
-			t.Fatalf("join scoring=%+v %v", e, err)
+			t.Fatalf("%s: join scoring=%v %v", tc.name, e.Score, err)
 		}
 	}
 }
@@ -181,24 +203,33 @@ func TestGroupedExampleValidatesAndScoresRepresentativeMessages(t *testing.T) {
 		// Message rule: solicitation plus any one business signal. Replay of
 		// 783 archived messages: 262/262 ad-bot posts, 2/400 normal messages.
 		{"advert_without_solicitation", map[string]float64{"content.advert": .99, "content.illicit": .99, "content.sexual": .99, "content.minor": .99}, 0},
-		{"solicitation_without_business", map[string]float64{"content.solicit": .99}, 0},
-		{"solicited_advert_boundary", map[string]float64{"content.solicit": .85, "content.advert": .85}, 100},
+		{"solicitation_without_business", map[string]float64{"content.solicit": .99}, 40},
+		{"solicited_advert_boundary", map[string]float64{"content.solicit": .85, "content.advert": .85}, 140},
 		{"solicitation_below_boundary", map[string]float64{"content.solicit": .84999, "content.advert": .99, "content.illicit": .99}, 0},
-		{"solicited_illicit_service", map[string]float64{"content.solicit": .85, "content.illicit": .85}, 100},
-		{"solicited_minor_sexualization", map[string]float64{"content.solicit": .85, "content.minor": .85}, 100},
-		{"solicited_real_sexual_content", map[string]float64{"content.solicit": .85, "content.sexual": .85, "content.fictional": .84999}, 100},
-		{"fictional_sexual_content_is_exempt", map[string]float64{"content.solicit": .99, "content.sexual": .99, "content.fictional": .85}, 0},
-		{"fiction_does_not_hide_advert", map[string]float64{"content.solicit": .85, "content.advert": .85, "content.fictional": .99}, 100},
-		{"fiction_does_not_hide_minor_sexualization", map[string]float64{"content.solicit": .85, "content.minor": .85, "content.fictional": .99}, 100},
+		{"solicited_illicit_service", map[string]float64{"content.solicit": .85, "content.illicit": .85}, 140},
+		{"solicited_minor_sexualization", map[string]float64{"content.solicit": .85, "content.minor": .85}, 140},
+		{"solicited_real_sexual_content", map[string]float64{"content.solicit": .85, "content.sexual": .85, "content.fictional": .84999}, 140},
+		{"fictional_sexual_content_is_exempt", map[string]float64{"content.solicit": .99, "content.sexual": .99, "content.fictional": .85}, 40},
+		{"fiction_does_not_hide_advert", map[string]float64{"content.solicit": .85, "content.advert": .85, "content.fictional": .99}, 140},
+		{"fiction_does_not_hide_minor_sexualization", map[string]float64{"content.solicit": .85, "content.minor": .85, "content.fictional": .99}, 140},
 		{"illicit_alone_is_not_scored", map[string]float64{"content.illicit": .99}, 0},
-		{"business_signals_below_boundary", map[string]float64{"content.solicit": .99, "content.advert": .84999, "content.illicit": .84999, "content.minor": .84999, "content.sexual": .84999}, 0},
-		{"one_message_rule_per_message", map[string]float64{"content.solicit": .99, "content.advert": .99, "content.illicit": .99, "content.minor": .99, "content.sexual": .99}, 100},
-		{"anime_profile_is_observational", map[string]float64{"profile.promotion": .99, "profile.sexual_anime": .99}, 0},
-		{"profile_money_boundary", map[string]float64{"profile.promotion": .85, "profile.money": .85}, 100},
-		{"profile_sexual_boundary", map[string]float64{"profile.promotion": .85, "profile.sexual": .85}, 100},
-		{"sources_are_independent", map[string]float64{"content.solicit": .99, "profile.money": .99}, 0},
-		{"both_sources", map[string]float64{"content.solicit": .99, "content.advert": .99, "profile.promotion": .99, "profile.sexual": .99}, 200},
-		{"earnings_are_observational", map[string]float64{"content.solicit": .99, "profile.promotion": .99, "profile.earnings": .99}, 0},
+		{"business_signals_below_boundary", map[string]float64{"content.solicit": .99, "content.advert": .84999, "content.illicit": .84999, "content.minor": .84999, "content.sexual": .84999}, 40},
+		{"one_message_rule_per_message", map[string]float64{"content.solicit": .99, "content.advert": .99, "content.illicit": .99, "content.minor": .99, "content.sexual": .99}, 140},
+		// Sender profile: business that warrants action on its own. Replay of
+		// 370 senders: 4 users, all spam (two payment agents, an ad-service
+		// account and a child-abuse lure).
+		{"profile_solicited_illicit", map[string]float64{"profile.solicit": .85, "profile.illicit": .85}, 100},
+		{"profile_solicited_money_lure", map[string]float64{"profile.solicit": .85, "profile.money_lure": .85}, 100},
+		{"profile_solicited_real_sexual", map[string]float64{"profile.solicit": .85, "profile.sexual": .85, "profile.fictional": .84999}, 100},
+		{"profile_fictional_sexual_is_exempt", map[string]float64{"profile.solicit": .99, "profile.sexual": .99, "profile.fictional": .85}, 0},
+		{"profile_minor_alone", map[string]float64{"profile.minor": .95}, 100},
+		{"profile_minor_below", map[string]float64{"profile.minor": .94999, "profile.fictional": .99}, 0},
+		{"profile_illicit_without_solicitation", map[string]float64{"profile.solicit": .84999, "profile.illicit": .99}, 0},
+		// Ordinary selling in a bio needs the message itself to solicit.
+		{"profile_advert_alone", map[string]float64{"profile.solicit": .99, "profile.advert": .99}, 60},
+		{"profile_advert_with_soliciting_message", map[string]float64{"profile.solicit": .85, "profile.advert": .85, "content.solicit": .85}, 100},
+		{"soliciting_message_alone", map[string]float64{"content.solicit": .99}, 40},
+		{"profile_business_and_message_rule", map[string]float64{"profile.solicit": .99, "profile.illicit": .99, "content.solicit": .99, "content.advert": .99}, 240},
 		{"target_answers_are_observational", map[string]float64{"target.invocation": .99, "target.promotion": .99, "target.money": .99, "target.sexual": .99, "target.sexual_anime": .99, "target.earnings": .99}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -222,8 +253,8 @@ func TestGroupedExampleValidatesAndScoresRepresentativeMessages(t *testing.T) {
 	for _, id := range []int64{-1001234567890, -1009876543210} {
 		p := c.ForGroup(id)
 		selected, err := c.SelectedQuestions(p)
-		if err != nil || len(selected) != 17 {
-			t.Fatalf("group %d lost the seventeen-question policy: %v", id, err)
+		if err != nil || len(selected) != 19 {
+			t.Fatalf("group %d lost the nineteen-question policy: %v", id, err)
 		}
 	}
 }

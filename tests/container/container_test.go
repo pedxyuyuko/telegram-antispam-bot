@@ -94,7 +94,7 @@ func TestImageHasNonRootDefaultsAndHTTPSRoots(t *testing.T) {
 	}
 	join := c.ForJoinGroup(-100)
 	joinQuestions, err := c.SelectedQuestions(join.Policy)
-	if c.JoinGate == nil || join.Enabled || join.Mode != "record" || err != nil || len(joinQuestions) != 5 {
+	if c.JoinGate == nil || join.Enabled || join.Mode != "record" || err != nil || len(joinQuestions) != 7 {
 		t.Fatal("image example lost the disabled independent join gate")
 	}
 	if r := join.Rules["delete_join_message"]; !r.Enabled || r.Action != "delete" {
@@ -104,10 +104,10 @@ func TestImageHasNonRootDefaultsAndHTTPSRoots(t *testing.T) {
 		t.Fatal("image example lost the grouped scoring configuration")
 	}
 	questions, err := c.SelectedQuestions(c.Base)
-	if err != nil || len(questions) != 17 {
-		t.Fatalf("image example lost the seventeen-question selection: %v", err)
+	if err != nil || len(questions) != 19 {
+		t.Fatalf("image example lost the nineteen-question selection: %v", err)
 	}
-	if !strings.Contains(questions["content.advert"].Instructions, ".message") || !strings.Contains(questions["profile.money"].Instructions, ".sender") || questions["target.invocation"].Type != "noul" {
+	if !strings.Contains(questions["content.advert"].Instructions, ".message") || !strings.Contains(questions["profile.advert"].Instructions, ".sender") || questions["target.invocation"].Type != "noul" {
 		t.Fatal("image example lost the separate message and sender regions")
 	}
 	if !strings.Contains(questions["content.advert"].Instructions, "图片内容") || c.Model.ImageTimeoutSeconds != 60 {
